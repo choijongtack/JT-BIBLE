@@ -93,6 +93,22 @@ const SystemPromptModal: React.FC<{ isOpen: boolean; onClose: () => void; prompt
     );
 };
 
+const BibleVersePanel: React.FC<{ topic: string, verse: string | null }> = ({ topic, verse }) => (
+    <div className="w-1/3 flex-shrink-0 bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-700 flex-shrink-0">
+            <h2 className="text-xl font-bold text-slate-100">{topic} 본문</h2>
+        </div>
+        <div className="p-4 sm:p-6 overflow-y-auto">
+            {verse ? (
+                <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{verse}</p>
+            ) : (
+                <p className="text-slate-400">성경 본문을 불러오는 중입니다...</p>
+            )}
+        </div>
+    </div>
+);
+
+
 const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ topic, onFinish, onBack }) => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [currentStep, setCurrentStep] = useState<LearningStep>(LearningStep.ANALYSIS);
@@ -101,6 +117,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ topic, 
     const [chatSession, setChatSession] = useState<Chat | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+    const [bibleVerse, setBibleVerse] = useState<string | null>(null);
 
     // Quiz state
     const [quizData, setQuizData] = useState<Quiz | null>(null);
@@ -119,8 +136,9 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ topic, 
         const stepMatch = text.match(/\[NEXT_STEP:(\w+)\]/);
         if (stepMatch && stepMatch[1]) {
             const nextStepKey = stepMatch[1] as keyof typeof LearningStep;
-            if (LearningStep[nextStepKey]) {
-                setCurrentStep(LearningStep[nextStepKey]);
+            const stepValue = Object.entries(LearningStep).find(([key, val]) => key === nextStepKey)?.[1];
+            if (stepValue) {
+                setCurrentStep(stepValue);
             }
             cleanedText = cleanedText.replace(stepMatch[0], '').trim();
         }
@@ -148,10 +166,19 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ topic, 
             setIsLoading(true);
             setError(null);
             setMessages([]);
+            setBibleVerse(null);
             try {
                 const { chat, initialMessage } = await startLearningConversation(topic);
                 setChatSession(chat);
-                const cleanedMessage = processAIResponse(initialMessage);
+                
+                const verseMatch = initialMessage.match(/\[BIBLE_VERSE\]([\s\S]*?)\[\/BIBLE_VERSE\]/);
+                let conversationStartMessage = initialMessage;
+                if (verseMatch && verseMatch[1]) {
+                    setBibleVerse(verseMatch[1].trim());
+                    conversationStartMessage = initialMessage.replace(verseMatch[0], '').trim();
+                }
+
+                const cleanedMessage = processAIResponse(conversationStartMessage);
                 if (cleanedMessage) {
                     setMessages([{ role: 'model', content: cleanedMessage }]);
                 }
@@ -212,84 +239,87 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ topic, 
             onFinish(score, quizData?.questions.length || 0);
         }
     };
-
-    if (quizData) {
-        const currentQuestion = quizData.questions[currentQuestionIndex];
-        return (
-            <div className="w-full max-w-4xl mx-auto">
-                 <QuizCard
-                    key={currentQuestionIndex}
-                    question={currentQuestion}
-                    questionNumber={currentQuestionIndex + 1}
-                    totalQuestions={quizData.questions.length}
-                    onSubmit={handleSubmitAnswer}
-                    onNext={handleNextQuestion}
-                />
-            </div>
-        );
-    }
     
     return (
         <React.Fragment>
-            <div className="w-full max-w-3xl h-[90vh] mx-auto flex flex-col bg-slate-800/50 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm p-4 sm:p-6">
-                <div className="flex-shrink-0">
-                    <button onClick={onBack} className="text-sm text-blue-400 hover:text-blue-300 mb-4">&larr; 다른 주제 선택하기</button>
-                    <h1 className="text-2xl font-bold text-slate-100 text-center mb-2">학습 주제: {topic}</h1>
-                    <div className="text-center mb-3">
-                         <button
-                            onClick={() => setIsPromptModalOpen(true)}
-                            className="text-xs text-slate-400 hover:text-blue-400 underline transition-colors"
-                         >
-                            AI 지침 보기
-                        </button>
-                    </div>
-                    <ProgressTracker currentStep={currentStep} />
-                    <hr className="border-slate-700 mb-4"/>
-                </div>
+            <div className="w-full max-w-7xl h-[90vh] mx-auto flex gap-6">
+                <BibleVersePanel topic={topic} verse={bibleVerse} />
 
-                <div ref={chatContainerRef} className="flex-1 overflow-y-auto pr-2 space-y-4">
-                    {messages.map((msg, index) => (
-                        <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-lg px-4 py-2.5 rounded-2xl ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-lg' : 'bg-slate-700 text-slate-200 rounded-bl-lg'}`}>
-                               <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                <div className="w-2/3 flex flex-col bg-slate-800/50 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
+                    {quizData ? (
+                        <div className="w-full h-full flex items-center justify-center p-4">
+                            <QuizCard
+                                key={currentQuestionIndex}
+                                question={quizData.questions[currentQuestionIndex]}
+                                questionNumber={currentQuestionIndex + 1}
+                                totalQuestions={quizData.questions.length}
+                                onSubmit={handleSubmitAnswer}
+                                onNext={handleNextQuestion}
+                            />
+                        </div>
+                    ) : (
+                        <>
+                            <div className="flex-shrink-0 p-4 sm:p-6">
+                                <button onClick={onBack} className="text-sm text-blue-400 hover:text-blue-300 mb-4">&larr; 다른 주제 선택하기</button>
+                                <h1 className="text-2xl font-bold text-slate-100 text-center mb-2">학습 주제: {topic}</h1>
+                                <div className="text-center mb-3">
+                                    <button
+                                        onClick={() => setIsPromptModalOpen(true)}
+                                        className="text-xs text-slate-400 hover:text-blue-400 underline transition-colors"
+                                    >
+                                        AI 지침 보기
+                                    </button>
+                                </div>
+                                <ProgressTracker currentStep={currentStep} />
+                                <hr className="border-slate-700 mb-4"/>
                             </div>
-                        </div>
-                    ))}
-                    {isLoading && (
-                        <div className="flex justify-start">
-                            <div className="max-w-lg px-4 py-2.5 rounded-2xl bg-slate-700 rounded-bl-lg">
-                               <LoadingDots />
-                            </div>
-                        </div>
-                    )}
-                     {error && (
-                        <div className="p-3 rounded-lg bg-red-900/50 border border-red-700 text-red-300 text-sm">
-                            <p className="font-bold mb-1">오류 발생</p>
-                            <p>{error}</p>
-                        </div>
-                    )}
-                </div>
 
-                <div className="flex-shrink-0 mt-4 pt-4 border-t border-slate-700">
-                    <form onSubmit={handleSendMessage} className="flex items-center gap-3">
-                        <input
-                            type="text"
-                            value={userInput}
-                            onChange={(e) => setUserInput(e.target.value)}
-                            placeholder={isLoading ? "AI가 응답하는 중..." : "답변을 입력하세요..."}
-                            disabled={isLoading}
-                            className="flex-1 w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none transition disabled:opacity-50"
-                            aria-label="User input"
-                        />
-                        <button
-                            type="submit"
-                            disabled={isLoading || !userInput.trim()}
-                            className="px-5 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
-                            aria-label="Send message"
-                        >
-                            전송
-                        </button>
-                    </form>
+                            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 pr-2 space-y-4">
+                                {messages.map((msg, index) => (
+                                    <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                        <div className={`max-w-lg px-4 py-2.5 rounded-2xl ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-lg' : 'bg-slate-700 text-slate-200 rounded-bl-lg'}`}>
+                                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                                {isLoading && (
+                                    <div className="flex justify-start">
+                                        <div className="max-w-lg px-4 py-2.5 rounded-2xl bg-slate-700 rounded-bl-lg">
+                                        <LoadingDots />
+                                        </div>
+                                    </div>
+                                )}
+                                {error && (
+                                    <div className="p-3 rounded-lg bg-red-900/50 border border-red-700 text-red-300 text-sm">
+                                        <p className="font-bold mb-1">오류 발생</p>
+                                        <p>{error}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex-shrink-0 mt-4 p-4 sm:p-6 border-t border-slate-700">
+                                <form onSubmit={handleSendMessage} className="flex items-center gap-3">
+                                    <input
+                                        type="text"
+                                        value={userInput}
+                                        onChange={(e) => setUserInput(e.target.value)}
+                                        placeholder={isLoading ? "AI가 응답하는 중..." : "답변을 입력하세요..."}
+                                        disabled={isLoading}
+                                        className="flex-1 w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none transition disabled:opacity-50"
+                                        aria-label="User input"
+                                    />
+                                    <button
+                                        type="submit"
+                                        disabled={isLoading || !userInput.trim()}
+                                        className="px-5 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
+                                        aria-label="Send message"
+                                    >
+                                        전송
+                                    </button>
+                                </form>
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
             <SystemPromptModal 

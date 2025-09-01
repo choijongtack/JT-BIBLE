@@ -4,11 +4,37 @@ import type { Quiz } from '../types';
 // The API key is expected to be provided via the process.env.API_KEY environment variable.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+export const getStudyTopicForBook = async (book: string): Promise<string> => {
+    try {
+        const prompt = `당신은 전문 신학자입니다. 저는 '${book}'을(를) 공부하기 시작하려고 합니다. 이 책의 시작 부분(1장 1절부터)을 분석하여, 첫 학습 세션에 적합한, 내용상 자연스럽게 구분되는 첫 번째 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 예를 들어, '에베소서'를 선택했다면 '에베소서 1:1-2' 또는 '에베소서 1:1-14'와 같이 제안할 수 있습니다. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        
+        const topic = response.text.trim();
+        if (!topic || !topic.includes(':')) {
+            throw new Error('AI가 유효한 주제를 반환하지 않았습니다.');
+        }
+        return topic;
+    } catch (error) {
+        console.error(`Error getting study topic for ${book}:`, error);
+        const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
+        throw new Error(`학습 주제를 가져오지 못했습니다: ${errorMessage}`);
+    }
+};
+
+
 export const getSystemInstruction = (topic: string) => {
     return `당신은 전문 신학자이자 개인 성경 공부 튜터입니다.
 당신의 교육 방식은 변호사가 법률 문서를 공부하는 방식에서 영감을 받았습니다: 분석적이고, 구조적이며, 핵심 원칙에 집중합니다.
 당신의 목표는 대화형 소크라테스식 문답법을 사용하여 사용자가 성경을 학습하도록 돕는 것입니다.
 
+**첫 번째 임무:**
+대화를 시작하기 전에, 먼저 '${topic}'에 해당하는 전체 성경 본문을 제공해야 합니다. 본문은 반드시 \`[BIBLE_VERSE]\`와 \`[/BIBLE_VERSE]\` 태그로 감싸야 합니다. 이 태그 다음 줄부터 사용자에게 환영 인사를 건네고 첫 번째 학습 단계를 시작하세요.
+
+**4가지 학습 단계:**
 당신은 사용자를 다음 4가지 학습 단계를 정확한 순서대로 이끌 것입니다:
 1. 분석(ANALYSIS): 성구의 구조, 핵심 단어, 논리적 흐름을 분해합니다.
 2. 이해(UNDERSTANDING): 신학적 의미, 역사적 맥락, 핵심 교리를 설명합니다.
@@ -17,7 +43,6 @@ export const getSystemInstruction = (topic: string) => {
 
 **당신의 진행 방식:**
 - 4단계 진행을 당신이 관리합니다.
-- 사용자가 선택한 주제 '${topic}'에 대해 '분석' 단계부터 시작합니다.
 - 한 번에 하나의 질문만 하세요. 설명은 간결하고 이해하기 쉽게 유지하세요. 한번에 너무 많은 텍스트를 제공하지 마세요.
 - 사용자의 답변을 기다리세요.
 - 답변을 평가하세요. 사용자가 이해했다면 칭찬하고 다음 질문이나 개념으로 넘어가세요. 어려워한다면 정답을 부드럽게 안내해주세요.
@@ -27,7 +52,6 @@ export const getSystemInstruction = (topic: string) => {
 - JSON 객체는 다음 스키마를 정확히 따라야 합니다: { "topic": "string", "questions": [ { "type": "FILL_IN_THE_BLANK", "verseReference": "string", "verseTextParts": ["string", "___", "string"], "answers": ["string"] }, ... (총 5문제) ] }
 - 텍스트 응답에 마크다운을 사용하지 마세요.
 - 대화 내내 친절하고, 격려하며, 학구적인 톤을 유지하세요.
-- 사용자를 환영하고 주제(${topic})에 대한 첫 번째 단계를 소개하며 대화를 시작하세요.
 `;
 };
 

@@ -1,9 +1,9 @@
-
 import React, { useState, useCallback } from 'react';
 import type { AppStatus } from './types';
 import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS } from './constants';
 import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
+import { getStudyTopicForBook } from './services/geminiService';
 
 const AppHeader: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
     <header className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm z-10">
@@ -17,13 +17,13 @@ const AppHeader: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
     </header>
 );
 
-const WelcomeScreen: React.FC<{ onStart: (topic: string) => void }> = ({ onStart }) => {
+const WelcomeScreen: React.FC<{ onStart: (book: string) => void }> = ({ onStart }) => {
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState('gemini');
 
     const handleStart = () => {
         if (selectedBook) {
-            onStart(`${selectedBook} 1:3-14`); // Default to Ephesians 1:3-14 as per conversation example
+            onStart(selectedBook);
         }
     };
 
@@ -91,7 +91,7 @@ const WelcomeScreen: React.FC<{ onStart: (topic: string) => void }> = ({ onStart
                     >
                         {selectedBook ? `${selectedBook} 학습 시작` : '학습 세션 시작하기'}
                     </button>
-                     {selectedBook && <p className="text-center text-sm text-slate-400 -mt-2">선택된 성경: <span className="font-bold text-blue-400">{selectedBook} 1:3-14</span></p>}
+                     {selectedBook && <p className="text-center text-sm text-slate-400 -mt-2">선택된 성경: <span className="font-bold text-blue-400">{selectedBook}</span></p>}
                 </div>
             </div>
         </div>
@@ -118,11 +118,21 @@ const App: React.FC = () => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [currentTopic, setCurrentTopic] = useState<string>('');
     const [lastScore, setLastScore] = useState<{ score: number, total: number }>({ score: 0, total: 0 });
+    const [error, setError] = useState<string | null>(null);
 
 
-    const handleStartLearning = useCallback((topic: string) => {
-        setCurrentTopic(topic);
-        setStatus('learning');
+    const handleStartLearning = useCallback(async (book: string) => {
+        setStatus('loading');
+        setError(null);
+        try {
+            const topic = await getStudyTopicForBook(book);
+            setCurrentTopic(topic);
+            setStatus('learning');
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : '주제를 가져오는 데 실패했습니다.');
+            setStatus('error');
+        }
     }, []);
     
     const handleFinishLearning = useCallback((score: number, total: number) => {
@@ -133,6 +143,7 @@ const App: React.FC = () => {
     const handleRestart = () => {
         setStatus('idle');
         setCurrentTopic('');
+        setError(null);
     };
     
     const handleLogin = () => {
@@ -154,10 +165,30 @@ const App: React.FC = () => {
         switch (status) {
             case 'idle':
                 return <WelcomeScreen onStart={handleStartLearning} />;
+            case 'loading':
+                return (
+                    <div className="text-center text-slate-300">
+                        <h2 className="text-3xl font-bold mb-4">주제 선정 중...</h2>
+                        <p>AI가 선택하신 성경에서 학습에 가장 적합한 부분을 찾고 있습니다.</p>
+                    </div>
+                );
             case 'learning':
                 return <ConversationalLearning topic={currentTopic} onFinish={handleFinishLearning} onBack={handleRestart} />;
             case 'finished':
                 return <ResultsScreen score={lastScore.score} total={lastScore.total} onRestart={handleRestart} />;
+            case 'error':
+                 return (
+                    <div className="text-center bg-slate-800/50 p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
+                        <h2 className="text-3xl font-bold text-red-400 mb-4">오류가 발생했습니다</h2>
+                        <p className="text-slate-300 text-lg mb-8">{error}</p>
+                        <button
+                            onClick={handleRestart}
+                            className="px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all transform hover:scale-105"
+                        >
+                            다시 시도하기
+                        </button>
+                    </div>
+                 );
             default:
                 return <LoginScreen onLogin={handleLogin} />;
         }
