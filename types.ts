@@ -1,3 +1,4 @@
+import { LearningStep } from './constants';
 
 export enum QuestionType {
   FILL_IN_THE_BLANK = 'FILL_IN_THE_BLANK',
@@ -25,9 +26,23 @@ export interface Quiz {
   questions: QuizQuestion[];
 }
 
-export type AppStatus = 'login' | 'idle' | 'loading' | 'learning' | 'finished' | 'error';
+export type AppStatus = 'login' | 'idle' | 'loading' | 'learning' | 'finished' | 'error' | 'session-prompt';
 
 export type ChatMessage = {
   role: 'user' | 'model';
   content: string;
 };
+
+export type AiModel = 'gemini' | 'perplexity' | 'chatgpt';
+
+export interface LearningSessionState {
+  topic: string;
+  currentStep: LearningStep;
+  messages: ChatMessage[];
+  aiModel: AiModel;
+  apiKey?: string;
+  bibleVerse: string | null;
+  score: number;
+  quizData: Quiz | null;
+  currentQuestionIndex: number;
+}

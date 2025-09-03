@@ -1,26 +1,35 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface LoginScreenProps {
-  onLogin: () => void;
+  onLogin: (email: string, password: string) => void;
+  onRegister: (email: string, password: string) => void;
+  error: string | null;
 }
 
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSigningUp, setIsSigningUp] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLocalError(error);
+  }, [error]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, you would perform validation, check if passwords match for signup,
-    // and then call an authentication service.
-    // Here, we just simulate a successful login/signup.
-    if (isSigningUp && password !== confirmPassword) {
-      alert("비밀번호가 일치하지 않습니다.");
-      return;
+    setLocalError(null);
+    
+    if (isSigningUp) {
+      if (password !== confirmPassword) {
+        setLocalError("비밀번호가 일치하지 않습니다.");
+        return;
+      }
+      onRegister(email, password);
+    } else {
+      onLogin(email, password);
     }
-    onLogin();
   };
   
   const toggleAuthMode = () => {
@@ -28,6 +37,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       setEmail('');
       setPassword('');
       setConfirmPassword('');
+      setLocalError(null);
   }
 
   return (
@@ -40,6 +50,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </p>
       </div>
       <form onSubmit={handleSubmit} className="space-y-6">
+        {localError && (
+          <div className="p-3 bg-red-900/50 border border-red-700 rounded-md">
+            <p className="text-sm text-red-300 text-center">{localError}</p>
+          </div>
+        )}
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-slate-300">
             이메일 주소
@@ -116,7 +131,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       </div>
 
        <p className="text-xs text-slate-500 mt-6 text-center">
-          참고: 이것은 시뮬레이션된 로그인/회원가입입니다. 실제 사용자 인증은 구현되지 않았습니다.
+          참고: 비밀번호는 암호화되지 않고 로컬 저장소에 저장됩니다. 실제 프로덕션 환경에서는 사용하지 마세요.
        </p>
     </div>
   );

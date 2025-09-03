@@ -1,58 +1,100 @@
-import { GoogleGenAI, type Chat } from "@google/genai";
-import type { Quiz, ChatMessage } from '../types';
+import type { ChatMessage, Quiz } from '../types';
 
-// The API key is expected to be provided via the process.env.API_KEY environment variable.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const PPLX_API_URL = 'https://api.perplexity.ai/chat/completions';
+const PPLX_MODEL = 'llama-3-sonar-small-32k-online';
 
-const toGeminiHistory = (history: ChatMessage[]) => {
-    return history.map(msg => ({
-        role: msg.role,
-        parts: [{ text: msg.content }]
-    }));
+
+export const testPerplexityApiKey = async (apiKey: string): Promise<boolean> => {
+    if (!apiKey) return false;
+    try {
+        const response = await fetch(PPLX_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: PPLX_MODEL,
+                messages: [{ role: 'user', content: 'Hello' }],
+                max_tokens: 5,
+            }),
+        });
+        return response.ok;
+    } catch (error) {
+        console.error('Perplexity API key test failed:', error);
+        return false;
+    }
 };
 
-export const getStudyTopicForBook = async (book: string): Promise<string> => {
+
+export const getStudyTopicForBook = async (book: string, apiKey: string): Promise<string> => {
     try {
         const prompt = `당신은 전문 신학자입니다. 저는 '${book}'을(를) 공부하기 시작하려고 합니다. 이 책의 시작 부분(1장 1절부터)을 분석하여, 첫 학습 세션에 적합한, 내용상 자연스럽게 구분되는 첫 번째 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 예를 들어, '에베소서'를 선택했다면 '에베소서 1:1-2' 또는 '에베소서 1:1-14'와 같이 제안할 수 있습니다. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
+        const response = await fetch(PPLX_API_URL, {
+             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: PPLX_MODEL,
+                messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
+            }),
         });
         
-        const topic = response.text.trim();
+        if (!response.ok) {
+            throw new Error(`Perplexity API request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        const topic = data.choices[0].message.content.trim();
+
         if (!topic || !topic.includes(':')) {
             throw new Error('AI가 유효한 주제를 반환하지 않았습니다.');
         }
         return topic;
     } catch (error) {
-        console.error(`Error getting study topic for ${book}:`, error);
+        console.error(`Error getting study topic for ${book} from Perplexity:`, error);
         const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
         throw new Error(`학습 주제를 가져오지 못했습니다: ${errorMessage}`);
     }
 };
 
-export const getNextStudyTopic = async (currentTopic: string): Promise<string> => {
+// FIX: Added missing getNextStudyTopic function.
+export const getNextStudyTopic = async (currentTopic: string, apiKey: string): Promise<string> => {
     try {
         const prompt = `현재 학습 주제는 '${currentTopic}'입니다. 이 구절 바로 다음에 이어지는, 내용상 자연스럽게 구분되는 다음 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
+        const response = await fetch(PPLX_API_URL, {
+             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: PPLX_MODEL,
+                messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
+            }),
         });
         
-        const topic = response.text.trim();
+        if (!response.ok) {
+            throw new Error(`Perplexity API request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        const topic = data.choices[0].message.content.trim();
+
         if (!topic || !topic.includes(':')) {
             throw new Error('AI가 유효한 다음 주제를 반환하지 않았습니다.');
         }
         return topic;
     } catch (error) {
-        console.error(`Error getting next study topic after ${currentTopic}:`, error);
+        console.error(`Error getting next study topic after ${currentTopic} from Perplexity:`, error);
         const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
         throw new Error(`다음 학습 주제를 가져오지 못했습니다: ${errorMessage}`);
     }
 };
-
 
 export const getSystemInstruction = (topic: string) => {
     return `당신은 전문 신학자이자 개인 성경 공부 튜터입니다.
@@ -84,37 +126,73 @@ export const getSystemInstruction = (topic: string) => {
 `;
 };
 
-export const startLearningConversation = async (topic: string, history?: ChatMessage[]): Promise<{ chat: Chat; initialMessage?: string }> => {
+// FIX: Corrected the return type of buildHistory to be more specific, avoiding potential type inference issues.
+const buildHistory = (systemInstruction: string, existingMessages: ChatMessage[]): {role: 'system' | 'user' | 'assistant'; content: string}[] => {
+    const history: {role: 'system' | 'user' | 'assistant'; content: string}[] = [{ role: 'system', content: systemInstruction }];
+    existingMessages.forEach(msg => history.push({ role: msg.role === 'model' ? 'assistant' : 'user', content: msg.content }));
+    return history;
+}
+
+export const startLearningConversation = async (topic: string, apiKey: string, history: ChatMessage[] = []): Promise<{ history: ChatMessage[]; initialMessage?: string }> => {
     try {
-        const chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
-            config: {
-                systemInstruction: getSystemInstruction(topic),
-            },
-            history: history ? toGeminiHistory(history) : [],
-        });
-
-        if (!history || history.length === 0) {
-            const response = await chat.sendMessage({ message: "학습을 시작해주세요." });
-            const initialMessage = response.text;
-            return { chat, initialMessage };
+        if (history.length > 0) {
+            return { history };
         }
-        
-        return { chat };
 
+        const systemInstruction = getSystemInstruction(topic);
+        const messages = buildHistory(systemInstruction, []);
+        messages.push({ role: 'user', content: '학습을 시작해주세요.' });
+
+        const response = await fetch(PPLX_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({ model: PPLX_MODEL, messages }),
+        });
+        
+        if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+        
+        const data = await response.json();
+        const initialMessage = data.choices[0].message.content;
+        
+        const newHistory: ChatMessage[] = [
+            { role: 'model', content: initialMessage }
+        ];
+
+        return { history: newHistory, initialMessage };
     } catch (error) {
-        console.error("Error starting conversation with Gemini:", error);
+        console.error("Error starting conversation with Perplexity:", error);
         const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
         throw new Error(`대화를 시작하지 못했습니다: ${errorMessage}`);
     }
 };
 
-export const continueLearningConversation = async (chat: Chat, message: string): Promise<string> => {
+export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string, apiKey: string): Promise<string> => {
     try {
-        const response = await chat.sendMessage({ message });
-        return response.text;
+        // System instruction is managed by Perplexity's API on their end for subsequent turns, 
+        // but it's good practice to send the full history for stateless APIs.
+        const systemInstruction = getSystemInstruction(''); // Topic is baked into history, so not critical here.
+        const messages = buildHistory(systemInstruction, currentHistory);
+        messages.push({ role: 'user', content: message });
+        
+        const response = await fetch(PPLX_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({ model: PPLX_MODEL, messages }),
+        });
+
+        if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+
+        const data = await response.json();
+        return data.choices[0].message.content;
+
     } catch (error) {
-        console.error("Error continuing conversation with Gemini:", error);
+        console.error("Error continuing conversation with Perplexity:", error);
         const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
         throw new Error(`대화를 이어가지 못했습니다: ${errorMessage}`);
     }

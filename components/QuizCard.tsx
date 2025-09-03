@@ -9,9 +9,10 @@ interface QuizCardProps {
   totalQuestions: number;
   onSubmit: (answers: string[]) => boolean;
   onNext: () => void;
+  onSkip: () => void;
 }
 
-const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQuestions, onSubmit, onNext }) => {
+const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQuestions, onSubmit, onNext, onSkip }) => {
   const [userAnswers, setUserAnswers] = useState<string[]>([]);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
@@ -120,7 +121,14 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
 
         {renderFeedback()}
         
-        <div className="mt-8 pt-6 border-t border-slate-700 flex justify-end">
+        <div className="mt-8 pt-6 border-t border-slate-700 flex justify-between items-center">
+          <button
+            type="button"
+            onClick={onSkip}
+            className="px-5 py-2 text-sm text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            시험 건너뛰기
+          </button>
           {!isSubmitted ? (
             <button
               type="submit"

@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { startLearningConversation, continueLearningConversation, getSystemInstruction } from '../services/geminiService';
+import { startLearningConversation as startGeminiConversation, continueLearningConversation as continueGeminiConversation, getSystemInstruction as getGeminiSystemInstruction } from '../services/geminiService';
+import { startLearningConversation as startPerplexityConversation, continueLearningConversation as continuePerplexityConversation, getSystemInstruction as getPerplexitySystemInstruction } from '../services/perplexityService';
+import { startLearningConversation as startChatGptConversation, continueLearningConversation as continueChatGptConversation, getSystemInstruction as getChatGptSystemInstruction } from '../services/chatgptService';
 import { LearningStep } from '../constants';
-import type { Quiz, ChatMessage, QuizQuestion } from '../types';
+import type { Quiz, ChatMessage, LearningSessionState, AiModel } from '../types';
 import { QuestionType } from '../types';
 import QuizCard from './QuizCard';
 import type { Chat } from '@google/genai';
 
 
 interface ConversationalLearningProps {
-  topic: string;
+  savedSession: LearningSessionState;
+  onStateChange: (newState: LearningSessionState) => void;
   onFinish: (score: number, total: number) => void;
   onBack: () => void;
 }
@@ -109,26 +112,42 @@ const BibleVersePanel: React.FC<{ topic: string, verse: string | null }> = ({ to
 );
 
 
-const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ topic, onFinish, onBack }) => {
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
-    const [currentStep, setCurrentStep] = useState<LearningStep>(LearningStep.ANALYSIS);
-    const [isLoading, setIsLoading] = useState(true);
+const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack }) => {
+    const { topic, aiModel, apiKey } = savedSession;
+    const [messages, setMessages] = useState<ChatMessage[]>(savedSession.messages);
+    const [currentStep, setCurrentStep] = useState<LearningStep>(savedSession.currentStep);
+    const [isLoading, setIsLoading] = useState(false);
     const [userInput, setUserInput] = useState('');
-    const [chatSession, setChatSession] = useState<Chat | null>(null);
+    const [chatSession, setChatSession] = useState<Chat | ChatMessage[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
-    const [bibleVerse, setBibleVerse] = useState<string | null>(null);
+    const [bibleVerse, setBibleVerse] = useState<string | null>(savedSession.bibleVerse);
+    const [isManualMode, setIsManualMode] = useState(false);
 
-    // Quiz state
-    const [quizData, setQuizData] = useState<Quiz | null>(null);
-    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-    const [score, setScore] = useState(0);
+    const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
+    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(savedSession.currentQuestionIndex);
+    const [score, setScore] = useState(savedSession.score);
     
     const chatContainerRef = useRef<HTMLDivElement>(null);
+    const isMounted = useRef(false);
 
     useEffect(() => {
         chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
     }, [messages, isLoading]);
+    
+    useEffect(() => {
+        if (!isMounted.current) return;
+        
+        onStateChange({
+            ...savedSession,
+            messages,
+            currentStep,
+            bibleVerse,
+            quizData,
+            currentQuestionIndex,
+            score,
+        });
+    }, [messages, currentStep, bibleVerse, quizData, currentQuestionIndex, score]);
 
     const processAIResponse = useCallback((text: string): string => {
         let cleanedText = text;
@@ -165,169 +184,266 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ topic, 
         const initConversation = async () => {
             setIsLoading(true);
             setError(null);
-            setMessages([]);
-            setBibleVerse(null);
+            
             try {
-                const { chat, initialMessage } = await startLearningConversation(topic);
-                setChatSession(chat);
-                
-                const verseMatch = initialMessage.match(/\[BIBLE_VERSE\]([\s\S]*?)\[\/BIBLE_VERSE\]/);
-                let conversationStartMessage = initialMessage;
-                if (verseMatch && verseMatch[1]) {
-                    setBibleVerse(verseMatch[1].trim());
-                    conversationStartMessage = initialMessage.replace(verseMatch[0], '').trim();
+                let initialMessage: string | undefined;
+                if (aiModel === 'perplexity' && apiKey) {
+                    const { history, initialMessage: perplexityMessage } = await startPerplexityConversation(topic, apiKey, savedSession.messages);
+                    setChatSession(history);
+                    initialMessage = perplexityMessage;
+                } else if (aiModel === 'chatgpt' && apiKey) {
+                    const { history, initialMessage: gptMessage } = await startChatGptConversation(topic, apiKey, savedSession.messages);
+                    setChatSession(history);
+                    initialMessage = gptMessage;
+                } else {
+                    const { chat, initialMessage: geminiMessage } = await startGeminiConversation(topic, savedSession.messages);
+                    setChatSession(chat);
+                    initialMessage = geminiMessage;
                 }
+                
+                if (initialMessage) {
+                    const verseMatch = initialMessage.match(/\[BIBLE_VERSE\]([\s\S]*?)\[\/BIBLE_VERSE\]/);
+                    let conversationStartMessage = initialMessage;
+                    if (verseMatch && verseMatch[1]) {
+                        setBibleVerse(verseMatch[1].trim());
+                        conversationStartMessage = initialMessage.replace(verseMatch[0], '').trim();
+                    }
 
-                const cleanedMessage = processAIResponse(conversationStartMessage);
-                if (cleanedMessage) {
-                    setMessages([{ role: 'model', content: cleanedMessage }]);
+                    const cleanedMessage = processAIResponse(conversationStartMessage);
+                    if (cleanedMessage) {
+                        setMessages([{ role: 'model', content: cleanedMessage }]);
+                    }
                 }
             } catch (e) {
                 setError(e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다');
             } finally {
                 setIsLoading(false);
+                isMounted.current = true;
             }
         };
+
         initConversation();
-    }, [topic, processAIResponse]);
+    }, [topic, aiModel, apiKey]); // This effect should only run when the session fundamentally changes.
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!userInput.trim() || isLoading || !chatSession) return;
 
         const newUserMessage: ChatMessage = { role: 'user', content: userInput };
-        setMessages(prev => [...prev, newUserMessage]);
+        const updatedMessages = [...messages, newUserMessage];
+        setMessages(updatedMessages);
+        
+        const currentInput = userInput;
         setUserInput('');
         setIsLoading(true);
         setError(null);
 
         try {
-            const responseText = await continueLearningConversation(chatSession, userInput);
-            const cleanedMessage = processAIResponse(responseText);
-
-            if (cleanedMessage) {
-                setMessages(prev => [...prev, { role: 'model', content: cleanedMessage }]);
+            let responseText: string;
+             if (aiModel === 'perplexity' && apiKey) {
+                responseText = await continuePerplexityConversation(chatSession as ChatMessage[], currentInput, apiKey);
+                const newModelMessage: ChatMessage = { role: 'model', content: responseText };
+                setChatSession([...(chatSession as ChatMessage[]), newUserMessage, newModelMessage]);
+            } else if (aiModel === 'chatgpt' && apiKey) {
+                responseText = await continueChatGptConversation(chatSession as ChatMessage[], currentInput, apiKey);
+                const newModelMessage: ChatMessage = { role: 'model', content: responseText };
+                setChatSession([...(chatSession as ChatMessage[]), newUserMessage, newModelMessage]);
+            } else {
+                responseText = await continueGeminiConversation(chatSession as Chat, currentInput);
             }
-        } catch (e) {
-            const errorMessage = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다';
-            setError(errorMessage);
-            setMessages(prev => [...prev, { role: 'model', content: `오류가 발생했습니다: ${errorMessage}` }]);
+            
+            const cleanedText = processAIResponse(responseText);
+            if (cleanedText) {
+                setMessages(prev => [...prev, { role: 'model', content: cleanedText }]);
+            }
+
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleManualNextStep = async () => {
+        const steps = Object.values(LearningStep);
+        const currentIndex = steps.indexOf(currentStep);
+        const nextStep = steps[currentIndex + 1];
+
+        if (!nextStep || isLoading || !chatSession) return;
+
+        const forceMessage = `[사용자 액션] '${nextStep}' 단계로 강제 이동합니다. 이 단계에 맞는 질문을 시작해주세요.`;
+        
+        const newUserMessage: ChatMessage = { role: 'user', content: forceMessage };
+        setMessages(prev => [...prev, newUserMessage]);
+        
+        setIsLoading(true);
+        setError(null);
+        
+        try {
+            let responseText: string;
+            
+            if (aiModel === 'perplexity' && apiKey) {
+                responseText = await continuePerplexityConversation(chatSession as ChatMessage[], forceMessage, apiKey);
+                const newModelMessage: ChatMessage = { role: 'model', content: responseText };
+                setChatSession([...(chatSession as ChatMessage[]), newUserMessage, newModelMessage]);
+            } else if (aiModel === 'chatgpt' && apiKey) {
+                responseText = await continueChatGptConversation(chatSession as ChatMessage[], forceMessage, apiKey);
+                const newModelMessage: ChatMessage = { role: 'model', content: responseText };
+                setChatSession([...(chatSession as ChatMessage[]), newUserMessage, newModelMessage]);
+            } else {
+                responseText = await continueGeminiConversation(chatSession as Chat, forceMessage);
+            }
+            
+            const cleanedText = processAIResponse(responseText);
+            if (cleanedText) {
+                setMessages(prev => [...prev, { role: 'model', content: cleanedText }]);
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다');
         } finally {
             setIsLoading(false);
         }
     };
     
-    const handleSubmitAnswer = (userAnswers: string[]): boolean => {
-        if (!quizData) return false;
-        const question = quizData.questions[currentQuestionIndex];
-        
+    const handleQuizSubmit = (answers: string[]): boolean => {
+        const currentQuestion = quizData?.questions[currentQuestionIndex];
+        if (!currentQuestion) return false;
+
         let isCorrect = false;
-        if (question.type === QuestionType.FILL_IN_THE_BLANK) {
-            isCorrect = userAnswers.every((ans, i) => ans.trim().toLowerCase() === question.answers[i].trim().toLowerCase());
-        } else if (question.type === QuestionType.QUESTION_ANSWER) {
-            isCorrect = (userAnswers[0]?.trim().toLowerCase() || '') === question.answer.trim().toLowerCase();
+        if (currentQuestion.type === QuestionType.FILL_IN_THE_BLANK) {
+            isCorrect = answers.every((ans, i) => ans.trim().toLowerCase() === currentQuestion.answers[i].trim().toLowerCase());
+        } else {
+            isCorrect = answers[0].trim().toLowerCase() === currentQuestion.answer.trim().toLowerCase();
         }
 
-        if (isCorrect) setScore(s => s + 1);
+        if (isCorrect) {
+            setScore(s => s + 1);
+        }
         return isCorrect;
     };
 
     const handleNextQuestion = () => {
-        if (quizData && currentQuestionIndex < quizData.questions.length - 1) {
+        if (currentQuestionIndex < (quizData?.questions.length || 0) - 1) {
             setCurrentQuestionIndex(i => i + 1);
         } else {
             onFinish(score, quizData?.questions.length || 0);
         }
     };
     
+    const handleSkipQuiz = () => {
+        onFinish(-1, quizData?.questions.length || 0); // Use a negative score to indicate a skip
+    }
+    
+    const getSystemPrompt = () => {
+        if(aiModel === 'perplexity') return getPerplexitySystemInstruction(topic);
+        if(aiModel === 'chatgpt') return getChatGptSystemInstruction(topic);
+        return getGeminiSystemInstruction(topic);
+    }
+    
+    if (error) {
+         return (
+            <div className="w-full h-full flex flex-col items-center justify-center text-center p-4">
+                <h2 className="text-2xl font-bold text-red-400 mb-4">대화 중 오류 발생</h2>
+                <p className="text-slate-300 max-w-md mb-6">{error}</p>
+                <button
+                    onClick={onBack}
+                    className="px-6 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors"
+                >
+                    돌아가기
+                </button>
+            </div>
+        );
+    }
+
     return (
-        <React.Fragment>
-            <div className="w-full max-w-7xl h-[90vh] mx-auto flex gap-6">
+        quizData ? (
+            <div className="w-full h-[95vh] max-w-7xl mx-auto p-4 sm:p-6 flex items-center justify-center">
+                <QuizCard
+                    question={quizData.questions[currentQuestionIndex]}
+                    questionNumber={currentQuestionIndex + 1}
+                    totalQuestions={quizData.questions.length}
+                    onSubmit={handleQuizSubmit}
+                    onNext={handleNextQuestion}
+                    onSkip={handleSkipQuiz}
+                />
+            </div>
+        ) : (
+            <div className="w-full h-[95vh] max-w-7xl mx-auto p-4 sm:p-6 flex flex-col sm:flex-row gap-6">
                 <BibleVersePanel topic={topic} verse={bibleVerse} />
 
-                <div className="w-2/3 flex flex-col bg-slate-800/50 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
-                    {quizData ? (
-                        <div className="w-full h-full flex items-center justify-center p-4">
-                            <QuizCard
-                                key={currentQuestionIndex}
-                                question={quizData.questions[currentQuestionIndex]}
-                                questionNumber={currentQuestionIndex + 1}
-                                totalQuestions={quizData.questions.length}
-                                onSubmit={handleSubmitAnswer}
-                                onNext={handleNextQuestion}
-                            />
+                <div className="flex-1 flex flex-col bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 overflow-hidden">
+                    <div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center flex-shrink-0 flex-wrap gap-2">
+                        <h2 className="text-xl font-bold text-slate-100 truncate pr-4" title={topic}>{topic}</h2>
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 p-1.5 bg-slate-900/50 rounded-lg border border-slate-600">
+                                <span className={`text-xs font-medium transition-colors ${!isManualMode ? 'text-blue-400' : 'text-slate-500'}`}>자동</span>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" checked={isManualMode} onChange={() => setIsManualMode(prev => !prev)} className="sr-only peer" />
+                                    <div className="w-10 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                                <span className={`text-xs font-medium transition-colors ${isManualMode ? 'text-blue-400' : 'text-slate-500'}`}>수정</span>
+                            </div>
+                            {isManualMode && currentStep !== LearningStep.TEST && (
+                                <button
+                                    onClick={handleManualNextStep}
+                                    disabled={isLoading}
+                                    className="px-3 py-1.5 text-xs bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-500 transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
+                                >
+                                    다음 단계로 &rarr;
+                                </button>
+                            )}
+                            <button onClick={() => setIsPromptModalOpen(true)} className="px-3 py-1.5 text-xs text-slate-400 border border-slate-600 rounded-md hover:bg-slate-700 hover:text-white transition-colors">
+                                지침 보기
+                            </button>
+                            <button onClick={onBack} className="px-3 py-1.5 text-xs bg-slate-600 text-white font-semibold rounded-md hover:bg-slate-500 transition-colors">
+                                뒤로가기
+                            </button>
                         </div>
-                    ) : (
-                        <>
-                            <div className="flex-shrink-0 p-4 sm:p-6">
-                                <button onClick={onBack} className="text-sm text-blue-400 hover:text-blue-300 mb-4">&larr; 다른 주제 선택하기</button>
-                                <h1 className="text-2xl font-bold text-slate-100 text-center mb-2">학습 주제: {topic}</h1>
-                                <div className="text-center mb-3">
-                                    <button
-                                        onClick={() => setIsPromptModalOpen(true)}
-                                        className="text-xs text-slate-400 hover:text-blue-400 underline transition-colors"
-                                    >
-                                        AI 지침 보기
-                                    </button>
+                    </div>
+
+                    <div className="p-4 sm:px-6 sm:py-4 border-b border-slate-700">
+                        <ProgressTracker currentStep={currentStep} />
+                    </div>
+
+                    <div ref={chatContainerRef} className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-6">
+                        {messages.map((msg, index) => (
+                            <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-xl px-5 py-3 rounded-2xl ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-lg' : 'bg-slate-700 text-slate-200 rounded-bl-lg'}`}>
+                                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                                 </div>
-                                <ProgressTracker currentStep={currentStep} />
-                                <hr className="border-slate-700 mb-4"/>
                             </div>
-
-                            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 pr-2 space-y-4">
-                                {messages.map((msg, index) => (
-                                    <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`max-w-lg px-4 py-2.5 rounded-2xl ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-lg' : 'bg-slate-700 text-slate-200 rounded-bl-lg'}`}>
-                                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
-                                        </div>
-                                    </div>
-                                ))}
-                                {isLoading && (
-                                    <div className="flex justify-start">
-                                        <div className="max-w-lg px-4 py-2.5 rounded-2xl bg-slate-700 rounded-bl-lg">
-                                        <LoadingDots />
-                                        </div>
-                                    </div>
-                                )}
-                                {error && (
-                                    <div className="p-3 rounded-lg bg-red-900/50 border border-red-700 text-red-300 text-sm">
-                                        <p className="font-bold mb-1">오류 발생</p>
-                                        <p>{error}</p>
-                                    </div>
-                                )}
+                        ))}
+                        {isLoading && (
+                            <div className="flex justify-start">
+                                <div className="max-w-xl px-5 py-3 rounded-2xl bg-slate-700 text-slate-200 rounded-bl-lg">
+                                    <LoadingDots />
+                                </div>
                             </div>
-
-                            <div className="flex-shrink-0 mt-4 p-4 sm:p-6 border-t border-slate-700">
-                                <form onSubmit={handleSendMessage} className="flex items-center gap-3">
-                                    <input
-                                        type="text"
-                                        value={userInput}
-                                        onChange={(e) => setUserInput(e.target.value)}
-                                        placeholder={isLoading ? "AI가 응답하는 중..." : "답변을 입력하세요..."}
-                                        disabled={isLoading}
-                                        className="flex-1 w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none transition disabled:opacity-50"
-                                        aria-label="User input"
-                                    />
-                                    <button
-                                        type="submit"
-                                        disabled={isLoading || !userInput.trim()}
-                                        className="px-5 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
-                                        aria-label="Send message"
-                                    >
-                                        전송
-                                    </button>
-                                </form>
-                            </div>
-                        </>
-                    )}
+                        )}
+                    </div>
+                    <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
+                        <form onSubmit={handleSendMessage} className="flex items-center gap-3">
+                            <input
+                                type="text"
+                                value={userInput}
+                                onChange={(e) => setUserInput(e.target.value)}
+                                placeholder="메시지를 입력하세요..."
+                                disabled={isLoading}
+                                className="flex-1 w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                            />
+                            <button
+                                type="submit"
+                                disabled={isLoading || !userInput.trim()}
+                                className="px-5 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
+                            >
+                                전송
+                            </button>
+                        </form>
+                    </div>
                 </div>
+                <SystemPromptModal isOpen={isPromptModalOpen} onClose={() => setIsPromptModalOpen(false)} prompt={getSystemPrompt()} />
             </div>
-            <SystemPromptModal 
-                isOpen={isPromptModalOpen}
-                onClose={() => setIsPromptModalOpen(false)}
-                prompt={getSystemInstruction(topic)}
-            />
-        </React.Fragment>
+        )
     );
 };
 
