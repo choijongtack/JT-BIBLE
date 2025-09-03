@@ -1,32 +1,42 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import type { AppStatus, LearningSessionState, AiModel } from './types';
-import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX } from './constants';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import type { AppStatus, LearningSessionState, AiModel, Profile } from './types';
+import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX, LearningStep } from './constants';
 import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic, testPerplexityApiKey } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic, testChatGptApiKey } from './services/chatgptService';
-import { getUserData, updateUserProgress, type UserProgress, loginUser, registerUser, saveActiveSession, UserData } from './services/userDataService';
-import { BIBLE_BOOK_DATA, calculateTotalStudiedVerses } from './services/bibleData';
+import { loginUser, registerUser, getProfile, updateUserProgress, saveActiveSession, logoutUser, createProfile, deleteUserAccount } from './services/userDataService';
+import { BIBLE_BOOK_DATA, calculateVersesFromTopics, getStudiedVersesForBooks, TOTAL_BIBLE_VERSES, TOTAL_OT_VERSES, TOTAL_NT_VERSES } from './services/bibleData';
+import { supabase } from './services/supabaseClient';
+import type { Session } from '@supabase/supabase-js';
 
 
 type KeyStatus = 'untested' | 'testing' | 'valid' | 'invalid';
 
-const AppHeader: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
+const AppHeader: React.FC<{ onLogout: () => void; onDelete: () => void; }> = ({ onLogout, onDelete }) => (
     <header className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm z-10">
         <div className="text-lg font-bold text-slate-200">성경 공부 도우미</div>
-        <button
-            onClick={onLogout}
-            className="px-4 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors text-sm"
-        >
-            로그아웃
-        </button>
+        <div className="flex items-center gap-2">
+            <button
+                onClick={onDelete}
+                className="px-4 py-2 text-red-400 font-semibold rounded-lg hover:bg-red-900/50 hover:text-red-300 transition-colors text-sm"
+            >
+                회원 탈퇴
+            </button>
+            <button
+                onClick={onLogout}
+                className="px-4 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors text-sm"
+            >
+                로그아웃
+            </button>
+        </div>
     </header>
 );
 
 const WelcomeScreen: React.FC<{ 
     onStart: (book: string, aiModel: AiModel, apiKey?: string) => void;
-    userProgress: UserProgress | null;
+    userProgress: Profile['progress'] | null;
 }> = ({ onStart, userProgress }) => {
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
@@ -74,7 +84,7 @@ const WelcomeScreen: React.FC<{
 
     const BookButton: React.FC<{ book: string }> = ({ book }) => {
         const studiedTopics = userProgress?.[book] || [];
-        const studiedVerses = calculateTotalStudiedVerses(studiedTopics);
+        const studiedVerses = calculateVersesFromTopics(studiedTopics);
         const totalVerses = BIBLE_BOOK_DATA[book]?.totalVerses || 0;
         const progressPercent = totalVerses > 0 ? Math.min(100, Math.round((studiedVerses / totalVerses) * 100)) : 0;
         const isSelected = selectedBook === book;
@@ -109,26 +119,76 @@ const WelcomeScreen: React.FC<{
                 return null;
         }
     }
+    
+    const ProgressBar: React.FC<{ label: string, progress: number, studied: number, total: number }> = ({ label, progress, studied, total }) => (
+        <div>
+            <div className="flex justify-between items-center text-sm mb-1 text-slate-300">
+                <span>{label}</span>
+                <span>{Math.round(progress)}%</span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-2.5">
+                <div 
+                    className="bg-blue-600 h-2.5 rounded-full" 
+                    style={{ width: `${progress}%` }}
+                ></div>
+            </div>
+            <p className="text-right text-xs text-slate-400 mt-1">
+                {studied.toLocaleString()} / {total.toLocaleString()}절
+            </p>
+        </div>
+    );
+
+    const totalStudied = getStudiedVersesForBooks(userProgress, [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
+    const otStudied = getStudiedVersesForBooks(userProgress, OLD_TESTAMENT_BOOKS);
+    const ntStudied = getStudiedVersesForBooks(userProgress, NEW_TESTAMENT_BOOKS);
+
+    const totalProgress = TOTAL_BIBLE_VERSES > 0 ? (totalStudied / TOTAL_BIBLE_VERSES) * 100 : 0;
+    const otProgress = TOTAL_OT_VERSES > 0 ? (otStudied / TOTAL_OT_VERSES) * 100 : 0;
+    const ntProgress = TOTAL_NT_VERSES > 0 ? (ntStudied / TOTAL_NT_VERSES) * 100 : 0;
 
 
     return (
-        <div className="w-full max-w-4xl mx-auto bg-slate-800/50 p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
+        <div className="w-full max-w-4xl mx-auto bg-slate-800/50 p-4 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
             <div className="text-center mb-8">
-                <h1 className="text-4xl font-bold text-slate-100 mb-2">성경 공부 도우미</h1>
+                <h1 className="text-3xl sm:text-4xl font-bold text-slate-100 mb-2">성경 공부 도우미</h1>
                 <p className="text-lg text-slate-300 mb-4">변호사의 방법</p>
                 <p className="text-slate-400">공부하고 싶은 성경을 선택하고 학습을 시작하세요.</p>
+            </div>
+            
+            <div className="mb-8 px-4 sm:px-0">
+                <h3 className="text-xl font-semibold text-slate-200 mb-4 text-center">전체 학습 진도율</h3>
+                <div className="bg-slate-900/50 p-4 rounded-lg grid grid-cols-1 sm:grid-cols-3 gap-6">
+                    <ProgressBar 
+                        label="성경 전체" 
+                        progress={totalProgress}
+                        studied={totalStudied}
+                        total={TOTAL_BIBLE_VERSES}
+                    />
+                    <ProgressBar 
+                        label="구약" 
+                        progress={otProgress}
+                        studied={otStudied}
+                        total={TOTAL_OT_VERSES}
+                    />
+                    <ProgressBar 
+                        label="신약" 
+                        progress={ntProgress}
+                        studied={ntStudied}
+                        total={TOTAL_NT_VERSES}
+                    />
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
                 <div>
                     <h3 className="text-xl font-semibold text-slate-200 mb-4 text-center">구약 (39권)</h3>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-60 overflow-y-auto pr-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-60 overflow-y-auto pr-2">
                         {OLD_TESTAMENT_BOOKS.map(book => <BookButton key={book} book={book} />)}
                     </div>
                 </div>
                 <div>
                     <h3 className="text-xl font-semibold text-slate-200 mb-4 text-center">신약 (27권)</h3>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-60 overflow-y-auto pr-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-60 overflow-y-auto pr-2">
                         {NEW_TESTAMENT_BOOKS.map(book => <BookButton key={book} book={book} />)}
                     </div>
                 </div>
@@ -226,7 +286,7 @@ const WelcomeScreen: React.FC<{
                                     <span>
                                         {(() => {
                                             const total = BIBLE_BOOK_DATA[selectedBook]?.totalVerses || 0;
-                                            const studied = calculateTotalStudiedVerses(userProgress[selectedBook]);
+                                            const studied = calculateVersesFromTopics(userProgress[selectedBook]);
                                             return total > 0 ? `${Math.round((studied / total) * 100)}%` : '0%';
                                         })()}
                                     </span>
@@ -236,13 +296,13 @@ const WelcomeScreen: React.FC<{
                                         className="bg-blue-600 h-2.5 rounded-full" 
                                         style={{ width: `${(() => {
                                             const total = BIBLE_BOOK_DATA[selectedBook]?.totalVerses || 0;
-                                            const studied = calculateTotalStudiedVerses(userProgress[selectedBook]);
+                                            const studied = calculateVersesFromTopics(userProgress[selectedBook]);
                                             return total > 0 ? Math.round((studied / total) * 100) : 0;
                                         })()}%`}}
                                     ></div>
                                 </div>
                                 <p className="text-right text-xs text-slate-400 mt-1">
-                                    {calculateTotalStudiedVerses(userProgress[selectedBook])} / {BIBLE_BOOK_DATA[selectedBook].totalVerses}절
+                                    {calculateVersesFromTopics(userProgress[selectedBook])} / {BIBLE_BOOK_DATA[selectedBook].totalVerses}절
                                 </p>
                             </div>
                         )}
@@ -266,7 +326,7 @@ const ResumeSessionPrompt: React.FC<{
     onResume: () => void;
     onDiscard: () => void;
 }> = ({ session, onResume, onDiscard }) => (
-    <div className="text-center bg-slate-800/50 p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
+    <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
         <h2 className="text-3xl font-bold text-slate-100 mb-4">진행 중인 학습 발견</h2>
         <p className="text-slate-300 text-lg mb-6">
             <span className="font-bold text-blue-400">{session.topic}</span> 학습을 이어서 하시겠습니까?
@@ -300,7 +360,7 @@ const ResultsScreen: React.FC<{
     const isSkipped = score < 0;
 
     return (
-        <div className="text-center bg-slate-800/50 p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
+        <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
             <h2 className="text-3xl font-bold text-slate-100 mb-4">
                 {isSkipped ? '시험을 건너뛰었습니다' : '학습 완료!'}
             </h2>
@@ -328,52 +388,240 @@ const ResultsScreen: React.FC<{
     );
 };
 
+const AwaitingConfirmationScreen: React.FC<{ onBackToLogin: () => void }> = ({ onBackToLogin }) => (
+    <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
+        <h2 className="text-3xl font-bold text-slate-100 mb-4">가입 확인</h2>
+        <p className="text-slate-300 text-lg mb-6">
+            가입을 완료하려면 받은 편지함에서 확인 이메일을 확인하세요. 이메일을 받지 못했다면 스팸 폴더를 확인해 보세요.
+        </p>
+        <button
+            onClick={onBackToLogin}
+            className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all"
+        >
+            로그인 화면으로 돌아가기
+        </button>
+    </div>
+);
+
+const RLSInstructions: React.FC = () => {
+    const [isOpen, setIsOpen] = useState(false);
+    const codeSnippet = `
+-- 1. "profiles" 테이블에 RLS 활성화
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- 2. SELECT 정책: 사용자는 자신의 프로필을 조회할 수 있습니다.
+CREATE POLICY "Users can view their own profile."
+ON public.profiles FOR SELECT
+USING (auth.uid() = id);
+
+-- 3. INSERT 정책: 사용자는 자신의 프로필을 생성할 수 있습니다.
+CREATE POLICY "Users can create their own profile."
+ON public.profiles FOR INSERT
+WITH CHECK (auth.uid() = id);
+
+-- 4. UPDATE 정책: 사용자는 자신의 프로필을 수정할 수 있습니다.
+CREATE POLICY "Users can update their own profile."
+ON public.profiles FOR UPDATE
+USING (auth.uid() = id)
+WITH CHECK (auth.uid() = id);
+    `.trim();
+
+    return (
+        <div className="text-left mt-6 border-t border-slate-700 pt-6">
+            <button onClick={() => setIsOpen(!isOpen)} className="w-full flex justify-between items-center text-lg font-semibold text-slate-200 hover:text-white transition-colors">
+                <span>솔루션: Supabase RLS 정책 설정하기</span>
+                <span className="transform transition-transform">{isOpen ? '▲' : '▼'}</span>
+            </button>
+            {isOpen && (
+                <div className="mt-4 space-y-4 text-slate-300">
+                    <p>
+                        이 오류는 Supabase 데이터베이스의 'profiles' 테이블에 대한 RLS(행 수준 보안) 정책이 설정되지 않았을 때 주로 발생합니다.
+                        아래 단계를 따라 정책을 설정해주세요.
+                    </p>
+                    <ol className="list-decimal list-inside space-y-2 pl-2">
+                        <li>Supabase 프로젝트 대시보드로 이동하세요.</li>
+                        <li>왼쪽 메뉴에서 'SQL Editor'를 선택하세요.</li>
+                        <li>'+ New query'를 클릭하세요.</li>
+                        <li>아래의 SQL 코드를 복사하여 붙여넣고 'RUN' 버튼을 클릭하세요.</li>
+                    </ol>
+                    <pre className="text-slate-300 text-left bg-slate-900/50 p-4 rounded-md font-mono text-sm whitespace-pre-wrap overflow-x-auto">
+                        <code>{codeSnippet}</code>
+                    </pre>
+                    <p>
+                        정책을 적용한 후, 이 페이지를 새로고침하여 다시 시도해주세요.
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+};
+
+
+const ProfileErrorScreen: React.FC<{ error: string; onLogout: () => void; }> = ({ error, onLogout }) => {
+    const isRLSError = error.includes('RLS') || error.includes('시간 초과');
+
+    return (
+        <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-2xl mx-auto">
+            <h2 className="text-3xl font-bold text-red-400 mb-4">프로필 로딩 실패</h2>
+            <pre className="text-slate-300 text-left bg-slate-900/50 p-4 rounded-md font-mono text-sm mb-6 whitespace-pre-wrap">{error}</pre>
+            <p className="text-slate-400 text-sm mb-6">
+                {isRLSError
+                    ? "아래 지침에 따라 문제를 해결한 후 페이지를 새로고침해주세요."
+                    : "위의 문제를 해결한 후, 페이지를 새로고침하여 다시 시도해주세요. 또는 로그아웃할 수 있습니다."
+                }
+            </p>
+            <button
+                onClick={onLogout}
+                className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all"
+            >
+                로그아웃
+            </button>
+            {isRLSError && <RLSInstructions />}
+        </div>
+    );
+};
+
 
 const App: React.FC = () => {
-    const [status, setStatus] = useState<AppStatus>('login');
-    const [currentUser, setCurrentUser] = useState<{ email: string; data: UserData } | null>(null);
+    const [status, setStatus] = useState<AppStatus>('loading');
+    const [session, setSession] = useState<Session | null>(null);
+    const [profile, setProfile] = useState<Profile | null>(null);
     const [activeSession, setActiveSession] = useState<LearningSessionState | null>(null);
-    const [lastScore, setLastScore] = useState<{ score: number, total: number }>({ score: 0, total: 0 });
+    const [lastScore, setLastScore] = useState<{ score: number, total: number, topic: string, aiModel: AiModel, apiKey?: string }>({ score: 0, total: 0, topic: '', aiModel: 'gemini', apiKey: undefined });
     const [error, setError] = useState<string | null>(null);
     const [authError, setAuthError] = useState<string | null>(null);
-    const [justChoseStartNew, setJustChoseStartNew] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState<string>('앱을 초기화하고 Supabase에 연결하는 중...');
     
+    const statusRef = useRef(status);
     useEffect(() => {
-        if (currentUser?.data.activeLearningSession) {
-            setActiveSession(currentUser.data.activeLearningSession);
-            setStatus('session-prompt');
-        } else if (currentUser) {
-            setStatus('idle');
-        }
-    }, [currentUser]);
+        statusRef.current = status;
+    }, [status]);
 
-    const handleStartLearning = useCallback(async (book: string, aiModel: AiModel, apiKey?: string) => {
-        if (activeSession) {
-            const currentBookName = activeSession.topic.split(' ')[0];
-            if (currentBookName === book) {
-                // User selected the same book they were studying. Resume the session.
-                if (justChoseStartNew) {
-                    // If resuming after "start new", show only the last part of the conversation.
-                    const truncatedMessages = activeSession.messages.slice(-2);
-                    setActiveSession(prev => prev ? { ...prev, messages: truncatedMessages } : null);
+    useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+            if (session && (statusRef.current === 'login' || statusRef.current === 'loading' || statusRef.current === 'awaiting-confirmation')) {
+                setLoadingMessage('인증 상태 변경 감지됨...');
+            }
+            
+            if (!session?.user) {
+                setSession(null);
+                setProfile(null);
+                setActiveSession(null);
+                // Only switch to login if not in a pending confirmation state
+                if (statusRef.current !== 'awaiting-confirmation' && statusRef.current !== 'profile_error') {
+                    setStatus('login');
                 }
-                setJustChoseStartNew(false); // Reset the flag
-                setStatus('learning');
                 return;
-            } else {
-                // User selected a different book. Confirm before starting a new session.
-                if (!window.confirm(`'${currentBookName}'에 대한 학습 세션이 진행 중입니다. 이 세션을 종료하고 '${book}'에 대한 새로운 학습을 시작하시겠습니까?`)) {
-                    return;
+            }
+            
+            // Avoid re-loading if we are intentionally showing a profile error.
+            if (statusRef.current === 'profile_error') return;
+
+            if (statusRef.current !== 'loading') {
+                setStatus('loading');
+            }
+
+            setLoadingMessage('세션 확인됨. 프로필 조회 시도 중...');
+            setAuthError(null);
+            try {
+                let userProfile = await getProfile(session.user);
+                
+                if (!userProfile) {
+                    setLoadingMessage('기존 프로필 없음. 신규 프로필 생성 시도 중...');
+                    userProfile = await createProfile(session.user.id, session.user.email);
+                    if (userProfile) {
+                        setLoadingMessage('신규 프로필 생성 성공.');
+                    }
+                } else {
+                     setLoadingMessage('기존 프로필을 성공적으로 불러왔습니다.');
                 }
+
+                if (!userProfile) {
+                    throw new Error("사용자 프로필을 가져오거나 생성하는 데 최종적으로 실패했습니다.");
+                }
+
+                setLoadingMessage('프로필 확인 완료. 앱 상태 설정 중...');
+                setSession(session);
+                setProfile(userProfile);
+                
+                if (userProfile.active_learning_session) {
+                    setLoadingMessage('진행 중인 학습 세션을 발견했습니다.');
+                    setActiveSession(userProfile.active_learning_session);
+                    setStatus('session-prompt');
+                } else {
+                    setLoadingMessage('준비 완료. 환영 화면으로 이동합니다.');
+                    setActiveSession(null);
+                    setStatus('idle');
+                }
+            } catch (e) {
+                const errorMessage = e instanceof Error ? e.message : "프로필을 로드하는 동안 알 수 없는 오류가 발생했습니다.";
+                console.error("Profile loading/creation failed:", errorMessage);
+                setError(errorMessage);
+                setStatus('profile_error');
+            }
+        });
+
+        return () => {
+            subscription.unsubscribe();
+        };
+    }, []);
+
+    const handleLogin = useCallback(async (email: string, password: string) => {
+        try {
+            setAuthError(null);
+            await loginUser(email, password);
+            // onAuthStateChange will handle the rest
+        } catch (e) {
+            setAuthError(e instanceof Error ? e.message : '로그인 실패');
+            throw e;
+        }
+    }, []);
+
+    const handleRegister = useCallback(async (email: string, password: string) => {
+        try {
+            setAuthError(null);
+            await registerUser(email, password);
+            setStatus('awaiting-confirmation');
+        } catch (e) {
+            setAuthError(e instanceof Error ? e.message : '가입 실패');
+            throw e;
+        }
+    }, []);
+
+    const handleLogout = useCallback(async () => {
+        try {
+            await logoutUser();
+            setSession(null);
+            setProfile(null);
+            setActiveSession(null);
+            setStatus('login');
+        } catch (e) {
+            setError(e instanceof Error ? e.message : '로그아웃 실패');
+            setStatus('error');
+        }
+    }, []);
+
+    const handleDeleteUser = useCallback(async () => {
+        if (!profile) return;
+        if (window.confirm("정말로 계정을 삭제하시겠습니까? 이 작업은 되돌릴 수 없으며 모든 학습 기록이 영구적으로 삭제됩니다.")) {
+            setStatus('loading');
+            setLoadingMessage('계정을 삭제하는 중입니다...');
+            try {
+                await deleteUserAccount();
+                await handleLogout(); // Reuse logout logic to clear state
+            } catch (e) {
+                setError(e instanceof Error ? e.message : '계정 삭제에 실패했습니다.');
+                setStatus('error');
             }
         }
-        
-        setJustChoseStartNew(false); // Always reset when starting a truly new session
+    }, [profile, handleLogout]);
+    
+    const handleStartLearning = async (book: string, aiModel: AiModel, apiKey?: string) => {
         setStatus('loading');
+        setLoadingMessage(`'${book}'에 대한 학습 주제를 찾는 중...`);
         setError(null);
         try {
             let topic: string;
-            
             if (aiModel === 'perplexity' && apiKey) {
                 topic = await getPerplexityStudyTopic(book, apiKey);
             } else if (aiModel === 'chatgpt' && apiKey) {
@@ -384,219 +632,188 @@ const App: React.FC = () => {
             
             const newSession: LearningSessionState = {
                 topic,
-                aiModel,
-                apiKey,
-                currentStep: '분석' as any,
+                currentStep: LearningStep.ANALYSIS,
                 messages: [],
+                aiModel: aiModel,
+                apiKey: apiKey,
                 bibleVerse: null,
                 score: 0,
                 quizData: null,
                 currentQuestionIndex: 0
             };
-
             setActiveSession(newSession);
-            if (currentUser) {
-                saveActiveSession(currentUser.email, newSession);
-            }
+            // Do not save to DB yet, wait for the conversation to start
             setStatus('learning');
-
-        } catch (err) {
-            console.error(err);
-            setError(err instanceof Error ? err.message : '주제를 가져오는 데 실패했습니다.');
+        } catch (e) {
+            setError(e instanceof Error ? e.message : '학습 세션을 시작하는 데 실패했습니다.');
             setStatus('error');
         }
-    }, [activeSession, currentUser, justChoseStartNew]);
-    
-    const handleSessionStateChange = useCallback((newState: LearningSessionState) => {
-        setActiveSession(newState);
-        if (currentUser) {
-            saveActiveSession(currentUser.email, newState);
-        }
-    }, [currentUser]);
-    
-    const handleFinishLearning = useCallback((score: number, total: number) => {
-        if (currentUser && activeSession && score >= 0) { // score is -1 if skipped
-            const bookName = activeSession.topic.split(' ')[0];
-            updateUserProgress(currentUser.email, bookName, activeSession.topic);
-            const updatedUserData = getUserData(currentUser.email);
-            if (updatedUserData) {
-                setCurrentUser(prev => prev ? { ...prev, data: updatedUserData } : null);
-            }
-        }
-        setLastScore({ score, total });
-        setActiveSession(null);
-        if (currentUser) {
-            saveActiveSession(currentUser.email, null);
-        }
-        setStatus('finished');
-    }, [currentUser, activeSession]);
+    };
 
-    const handleContinueLearning = useCallback(async () => {
-        if (!activeSession) {
-             // This case should ideally not happen if called from ResultsScreen,
-             // but as a fallback, let's try to get the last topic from user progress.
-             // For now, we show an error.
-             setError('현재 학습 세션 정보가 없습니다.');
-             setStatus('error');
-             return;
-        }
-
-        setStatus('loading');
-        setError(null);
+    const handleFinishLearning = useCallback(async (score: number, total: number) => {
+        if (!activeSession || !profile) return;
 
         try {
+            // Only update progress if the test wasn't skipped
+            if(score >= 0) {
+                const newProgress = await updateUserProgress(
+                    profile.id,
+                    activeSession.topic.split(' ')[0],
+                    activeSession.topic,
+                    profile.progress
+                );
+                setProfile(prev => prev ? { ...prev, progress: newProgress } : null);
+            }
+        } catch (e) {
+             setError(e instanceof Error ? e.message : '진행 상황을 업데이트하는 데 실패했습니다.');
+             setStatus('error');
+             return; // Stop execution if progress fails to save
+        }
+        
+        setLastScore({ score, total, topic: activeSession.topic, aiModel: activeSession.aiModel, apiKey: activeSession.apiKey });
+        setActiveSession(null);
+        if (profile?.id) {
+            await saveActiveSession(profile.id, null);
+        }
+        setStatus('finished');
+    }, [activeSession, profile]);
+
+    const handleContinueLearning = useCallback(async () => {
+        setStatus('loading');
+        setLoadingMessage(`'${lastScore.topic}' 이후의 학습 주제를 찾는 중...`);
+        setError(null);
+        try {
+            const bookName = lastScore.topic.split(' ')[0];
+            if (!bookName) throw new Error("책 이름을 찾을 수 없습니다.");
+            
             let nextTopic: string;
-            const { aiModel, apiKey, topic } = activeSession;
-            const bookName = topic.split(' ')[0];
-
-            if (aiModel === 'perplexity' && apiKey) {
-                nextTopic = await getNextPerplexityStudyTopic(topic, apiKey);
-            } else if (aiModel === 'chatgpt' && apiKey) {
-                nextTopic = await getNextChatGptStudyTopic(topic, apiKey);
+            if (lastScore.aiModel === 'perplexity' && lastScore.apiKey) {
+                nextTopic = await getNextPerplexityStudyTopic(lastScore.topic, lastScore.apiKey);
+            } else if (lastScore.aiModel === 'chatgpt' && lastScore.apiKey) {
+                nextTopic = await getNextChatGptStudyTopic(lastScore.topic, lastScore.apiKey);
             } else {
-                nextTopic = await getNextGeminiStudyTopic(topic);
+                nextTopic = await getNextGeminiStudyTopic(lastScore.topic);
             }
-
-            if (nextTopic === topic || !nextTopic.startsWith(bookName)) {
-                setError(`'${bookName}'의 학습을 모두 마쳤습니다! 다른 성경을 선택해주세요.`);
-                setStatus('error');
-                return;
-            }
-
+            
             const newSession: LearningSessionState = {
                 topic: nextTopic,
-                aiModel,
-                apiKey,
-                currentStep: '분석' as any,
+                currentStep: LearningStep.ANALYSIS,
                 messages: [],
+                aiModel: lastScore.aiModel,
+                apiKey: lastScore.apiKey,
                 bibleVerse: null,
                 score: 0,
                 quizData: null,
-                currentQuestionIndex: 0,
+                currentQuestionIndex: 0
             };
-
             setActiveSession(newSession);
-             if (currentUser) {
-                saveActiveSession(currentUser.email, newSession);
-            }
             setStatus('learning');
-
-        } catch (err) {
-            console.error(err);
-            setError(err instanceof Error ? err.message : '다음 주제를 가져오는 데 실패했습니다.');
+        } catch (e) {
+            setError(e instanceof Error ? e.message : '다음 학습 세션을 시작하는 데 실패했습니다.');
             setStatus('error');
         }
-    }, [activeSession, currentUser]);
+    }, [lastScore]);
 
-    const handleRestart = () => {
-        setActiveSession(null);
-        if (currentUser) {
-            saveActiveSession(currentUser.email, null);
+    const handleStateChange = useCallback(async (newState: LearningSessionState) => {
+        setActiveSession(newState);
+        if (profile?.id) {
+            await saveActiveSession(profile.id, newState);
         }
+    }, [profile?.id]);
+
+    const handleRestart = useCallback(() => {
         setStatus('idle');
+        setActiveSession(null);
+        setLastScore({ score: 0, total: 0, topic: '', aiModel: 'gemini', apiKey: undefined });
+    }, []);
+    
+    const handleResume = useCallback(() => {
+        setStatus('learning');
+    }, []);
+    
+    const handleDiscard = useCallback(async () => {
+        if (profile?.id) {
+            await saveActiveSession(profile.id, null);
+        }
+        setActiveSession(null);
+        setStatus('idle');
+    }, [profile?.id]);
+
+    const handleBackToMain = useCallback(() => {
         setError(null);
-    };
-
-    const handleReturnToSelection = () => {
         setStatus('idle');
-    };
+    }, []);
     
-    const handleLogin = async (email: string, password: string) => {
-        setAuthError(null);
-        try {
-            const userData = loginUser(email, password);
-            setCurrentUser({ email, data: userData });
-        } catch (error) {
-            setAuthError(error instanceof Error ? error.message : '로그인 실패');
-        }
-    };
-    
-    const handleRegister = async (email: string, password: string) => {
-        setAuthError(null);
-        try {
-            const userData = registerUser(email, password);
-            setCurrentUser({ email, data: userData });
-        } catch (error) {
-            setAuthError(error instanceof Error ? error.message : '회원가입 실패');
-        }
-    };
-
-    const handleLogout = () => {
-        setCurrentUser(null);
-        setActiveSession(null);
-        setStatus('login');
-    };
 
     const renderContent = () => {
-        if (!currentUser) {
-            return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} error={authError} />;
-        }
-
         switch (status) {
-            case 'session-prompt':
-                return <ResumeSessionPrompt 
-                    session={activeSession!}
-                    onResume={() => {
-                        setJustChoseStartNew(false);
-                        setStatus('learning');
-                    }}
-                    onDiscard={() => {
-                        // Don't clear the active session, just go to the selection screen.
-                        // This allows the user to resume if they select the same book.
-                        setJustChoseStartNew(true);
-                        setStatus('idle');
-                    }}
-                />
-            case 'idle':
-                return <WelcomeScreen onStart={handleStartLearning} userProgress={currentUser.data.progress} />;
             case 'loading':
                 return (
-                    <div className="text-center text-slate-300">
-                        <h2 className="text-3xl font-bold mb-4">다음 주제 준비 중...</h2>
-                        <p>AI가 다음 학습에 가장 적합한 부분을 찾고 있습니다.</p>
+                    <div className="text-center">
+                        <div className="w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <p className="text-slate-300">{loadingMessage}</p>
                     </div>
                 );
+            case 'login':
+                return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} error={authError} />;
+            case 'awaiting-confirmation':
+                return <AwaitingConfirmationScreen onBackToLogin={() => setStatus('login')} />;
+            case 'profile_error':
+                 return <ProfileErrorScreen error={error || "알 수 없는 프로필 오류가 발생했습니다."} onLogout={handleLogout} />;
+            case 'idle':
+                return (
+                    <div className="w-full min-h-screen flex items-center justify-center p-4">
+                        <AppHeader onLogout={handleLogout} onDelete={handleDeleteUser} />
+                        <WelcomeScreen 
+                            onStart={handleStartLearning} 
+                            userProgress={profile?.progress ?? null} 
+                        />
+                    </div>
+                );
+            case 'session-prompt':
+                if (!activeSession) { // Should not happen, but as a fallback
+                    setStatus('idle');
+                    return null;
+                }
+                return <ResumeSessionPrompt session={activeSession} onResume={handleResume} onDiscard={handleDiscard} />;
             case 'learning':
-                if (!activeSession) return <div>세션 정보가 없습니다...</div>
+                if (!activeSession) { // Should not happen
+                     setStatus('idle');
+                     return null;
+                }
                 return <ConversationalLearning 
-                    key={activeSession.topic} // force re-mount when topic changes
-                    savedSession={activeSession}
-                    onStateChange={handleSessionStateChange}
-                    onFinish={handleFinishLearning} 
-                    onBack={handleReturnToSelection}
-                 />;
+                    savedSession={activeSession} 
+                    onStateChange={handleStateChange}
+                    onFinish={handleFinishLearning}
+                    onBack={handleBackToMain}
+                />;
             case 'finished':
                 return <ResultsScreen 
                     score={lastScore.score} 
                     total={lastScore.total} 
-                    onRestart={handleRestart} 
+                    topic={lastScore.topic}
+                    onRestart={handleRestart}
                     onContinue={handleContinueLearning}
-                    topic={activeSession?.topic || ''}
                 />;
             case 'error':
-                 return (
-                    <div className="text-center bg-slate-800/50 p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
+                return (
+                    <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-2xl mx-auto">
                         <h2 className="text-3xl font-bold text-red-400 mb-4">오류가 발생했습니다</h2>
-                        <p className="text-slate-300 text-lg mb-8">{error}</p>
+                        <pre className="text-slate-300 text-left bg-slate-900/50 p-4 rounded-md font-mono text-sm mb-6 whitespace-pre-wrap">{error}</pre>
                         <button
-                            onClick={handleRestart}
-                            className="px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all transform hover:scale-105"
+                            onClick={handleBackToMain}
+                            className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all"
                         >
-                            다시 시도하기
+                            메인 화면으로 돌아가기
                         </button>
                     </div>
-                 );
-            default:
-                return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} error={authError} />;
+                );
         }
     };
 
     return (
-        <main className="min-h-screen w-full flex items-center justify-center p-4 bg-slate-900 text-white font-sans relative">
-            {currentUser && <AppHeader onLogout={handleLogout} />}
-            <div className="w-full h-full flex items-center justify-center">
-                 {renderContent()}
-            </div>
+        <main className="w-full min-h-screen flex items-center justify-center p-4 font-sans antialiased">
+            {renderContent()}
         </main>
     );
 };

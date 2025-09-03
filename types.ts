@@ -26,7 +26,7 @@ export interface Quiz {
   questions: QuizQuestion[];
 }
 
-export type AppStatus = 'login' | 'idle' | 'loading' | 'learning' | 'finished' | 'error' | 'session-prompt';
+export type AppStatus = 'login' | 'idle' | 'loading' | 'learning' | 'finished' | 'error' | 'session-prompt' | 'awaiting-confirmation' | 'profile_error';
 
 export type ChatMessage = {
   role: 'user' | 'model';
@@ -45,4 +45,15 @@ export interface LearningSessionState {
   score: number;
   quizData: Quiz | null;
   currentQuestionIndex: number;
+}
+
+export interface UserProgress {
+    [book: string]: string[];
+}
+
+export interface Profile {
+    id: string;
+    email?: string;
+    progress: UserProgress;
+    active_learning_session: LearningSessionState | null;
 }

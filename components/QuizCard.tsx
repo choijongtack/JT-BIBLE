@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import type { QuizQuestion } from '../types';
 import { QuestionType } from '../types';
 import { IconCheck, IconX } from '../constants';
@@ -24,11 +24,13 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
     setIsCorrect(false);
   }, [question]);
 
-  const handleInputChange = (index: number, value: string) => {
-    const newAnswers = [...userAnswers];
-    newAnswers[index] = value;
-    setUserAnswers(newAnswers);
-  };
+  const handleInputChange = useCallback((index: number, value: string) => {
+    setUserAnswers(currentAnswers => {
+      const newAnswers = [...currentAnswers];
+      newAnswers[index] = value;
+      return newAnswers;
+    });
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,25 +44,26 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
     const q = question as import('../types').FillInTheBlankQuestion;
     let answerIndex = 0;
     return (
-      <p className="text-xl/relaxed text-slate-300">
+      <div className="text-lg/relaxed sm:text-xl/relaxed text-slate-300 flex flex-wrap items-baseline gap-x-2 gap-y-4">
         {q.verseTextParts.map((part, i) => {
           if (part === '___') {
             const currentIndex = answerIndex++;
             return (
               <input
-                key={`blank-${i}`}
+                key={`blank-${i}-${currentIndex}`}
                 type="text"
                 value={userAnswers[currentIndex] || ''}
                 onChange={(e) => handleInputChange(currentIndex, e.target.value)}
                 readOnly={isSubmitted}
-                className="inline-block w-32 mx-2 px-2 py-1 bg-slate-700 border border-slate-500 rounded-md text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                className="inline-block w-28 sm:w-32 px-2 py-1 bg-slate-700 border border-slate-500 rounded-md text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
                 autoFocus={currentIndex === 0}
+                aria-label={`Blank ${currentIndex + 1}`}
               />
             );
           }
           return <span key={`text-${i}`}>{part}</span>;
         })}
-      </p>
+      </div>
     );
   };
 
@@ -68,7 +71,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
     const q = question as import('../types').QAQuestion;
     return (
       <div>
-        <p className="text-xl/relaxed text-slate-300 mb-4">{q.question}</p>
+        <p className="text-lg/relaxed sm:text-xl/relaxed text-slate-300 mb-4">{q.question}</p>
         <textarea
           value={userAnswers[0] || ''}
           onChange={(e) => handleInputChange(0, e.target.value)}
@@ -108,7 +111,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
   const canSubmit = userAnswers.every(answer => answer.trim() !== '');
 
   return (
-    <div className="w-full max-w-3xl mx-auto bg-slate-800/50 p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
+    <div className="w-full max-w-3xl mx-auto bg-slate-800/50 p-6 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
       <div className="mb-6">
         <p className="text-sm font-medium text-blue-400">{question.verseReference}</p>
         <p className="text-slate-400 text-sm">문제 {questionNumber} / {totalQuestions}</p>

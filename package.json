@@ -1,5 +1,5 @@
 {
-  "name": "성경-공부-도우미:-변호사의-방법",
+  "name": "성경-공부-도우미:-4단계-학습-방법",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,7 +11,8 @@
   "dependencies": {
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "@google/genai": "^1.16.0"
+    "@google/genai": "^1.16.0",
+    "@supabase/supabase-js": "^2.45.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

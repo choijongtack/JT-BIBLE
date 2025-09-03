@@ -1,107 +1,183 @@
-import type { LearningSessionState } from '../types';
+import { supabase } from './supabaseClient';
+import type { LearningSessionState, UserProgress, Profile } from '../types';
+import type { User } from '@supabase/supabase-js';
 
-export interface UserProgress {
-    [book: string]: string[]; // e.g., { "에베소서": ["에베소서 1:1-14", "에베소서 1:15-23"] }
+const API_TIMEOUT = 15000; // 15 seconds
+
+// FIX: Changed 'promise' parameter type from 'Promise<T>' to 'PromiseLike<T>'. Supabase query builders are "thenable" (PromiseLike) but not actual Promises. This makes `withTimeout` compatible with them and resolves type errors in this file.
+function withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(
+        `데이터베이스 작업이 ${ms / 1000}초 후에 시간 초과되었습니다. ` +
+        `이는 보통 Supabase의 RLS(행 수준 보안) 정책이 없거나 잘못 설정되었을 때 발생합니다. ` +
+        `'profiles' 테이블에 대해 인증된 사용자가 자신의 데이터를 'SELECT', 'INSERT', 'UPDATE' 할 수 있도록 허용하는 정책이 있는지 확인해주세요. ` +
+        `자세한 내용은 Supabase 문서를 참조하세요: https://supabase.com/docs/guides/auth/row-level-security`
+      ));
+    }, ms);
+
+    promise.then(
+      (res) => {
+        clearTimeout(timeoutId);
+        resolve(res);
+      },
+      (err) => {
+        clearTimeout(timeoutId);
+        reject(err);
+      }
+    );
+  });
 }
 
-export interface UserData {
-    passwordHash: string; // FAKE HASH - NOT FOR PRODUCTION
-    progress: UserProgress;
-    activeLearningSession: LearningSessionState | null;
+export const registerUser = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw error;
+    // The on_auth_user_created trigger in Supabase is expected to create a profile.
+    // The client now has a fallback to create it if the trigger fails.
+    return { user: data.user, session: data.session };
+};
+
+export const loginUser = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+};
+
+export const logoutUser = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+};
+
+export const deleteUserAccount = async () => {
+    const { data, error } = await supabase.functions.invoke('delete-user', {
+        method: 'POST',
+    });
+
+    // 기본 오류 객체를 확인합니다 (네트워크 오류, 4xx/5xx 상태 코드 등).
+    if (error) {
+        console.error('Error deleting user account (from error object):', error);
+        throw new Error(`계정 삭제에 실패했습니다: ${error.message}`);
+    }
+
+    // 함수가 2xx 상태를 반환했지만 응답 본문에 오류를 포함하는 경우를 대비한 추가 확인.
+    if (data && data.error) {
+        console.error('Error deleting user account (from data object):', data.error);
+        throw new Error(`계정 삭제에 실패했습니다: ${data.error}`);
+    }
+    
+    // 성공 응답에 예상된 메시지가 없는 경우를 확인합니다.
+    if (!data || !data.message) {
+         console.error('Unexpected response from delete-user function:', data);
+         throw new Error('사용자 삭제 중 예기치 않은 응답을 받았습니다.');
+    }
+};
+
+
+export const getProfile = async (user: User): Promise<Profile | null> => {
+    try {
+        const promise = supabase
+            .from('profiles')
+            .select(`*`)
+            .eq('id', user.id)
+            .single();
+        
+        const { data, error, status } = await withTimeout(promise, API_TIMEOUT);
+        
+        if (error && status !== 406) {
+            // A 406 status indicates no rows were found, which is a valid scenario.
+            // We don't throw an error for that, just return null.
+            console.error('Error fetching profile:', error.message);
+            throw error;
+        }
+        
+        return data;
+    } catch (error) {
+        // This catch block is for network errors or unexpected issues.
+        console.error("An exception occurred while fetching the profile:", error);
+        throw error;
+    }
 }
 
-const STORAGE_KEY = 'bibleStudyApp_users_db';
-
-// A mock database using localStorage
-const getDb = (): Record<string, UserData> => {
+export const createProfile = async (userId: string, email?: string): Promise<Profile> => {
     try {
-        const dbString = localStorage.getItem(STORAGE_KEY);
-        return dbString ? JSON.parse(dbString) : {};
-    } catch (e) {
-        console.error("Failed to read from localStorage", e);
-        return {};
+        const insertPromise = supabase
+            .from('profiles')
+            .insert({
+                id: userId,
+                email: email,
+                progress: {},
+                active_learning_session: null,
+            })
+            .select()
+            .single();
+
+        const { data, error } = await withTimeout(insertPromise, API_TIMEOUT);
+
+        if (error) {
+            // Handle race condition: if profile was created by the trigger between our check and insert.
+            if (error.code === '23505') { // unique_violation
+                console.warn('Profile already exists, likely created by trigger. Fetching.');
+                const fetchPromise = supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', userId)
+                    .single();
+                
+                const { data: existingData, error: fetchError } = await withTimeout(fetchPromise, API_TIMEOUT);
+
+                if (fetchError) throw fetchError;
+                if (!existingData) throw new Error("Profile not found even after unique violation.");
+                
+                return existingData;
+            }
+            throw error;
+        }
+        if (!data) throw new Error("Insert operation did not return profile data.");
+
+        return data;
+
+    } catch (error) {
+        console.error('Error in createProfile:', error);
+        throw new Error(`Failed to create user profile: ${error instanceof Error ? error.message : String(error)}`);
     }
 };
 
-const saveDb = (db: Record<string, UserData>) => {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-    } catch (e) {
-        console.error("Failed to write to localStorage", e);
-    }
-};
 
-// IMPORTANT: This is a fake hash for demonstration purposes ONLY.
-// In a real application, use a strong, salted hashing algorithm like bcrypt.
-const fakeHash = (password: string): string => {
-    return `hashed_${password}_salted`;
-};
-
-
-export const registerUser = (email: string, password: string): UserData => {
-    if (!email || !password) {
-        throw new Error("이메일과 비밀번호를 모두 입력해주세요.");
-    }
-    const db = getDb();
-    if (db[email]) {
-        throw new Error("이미 존재하는 이메일입니다.");
-    }
-
-    const newUser: UserData = {
-        passwordHash: fakeHash(password),
-        progress: {},
-        activeLearningSession: null,
-    };
-
-    db[email] = newUser;
-    saveDb(db);
-    return newUser;
-};
-
-export const loginUser = (email: string, password: string): UserData => {
-    const db = getDb();
-    const user = db[email];
-
-    if (!user) {
-        throw new Error("존재하지 않는 사용자입니다.");
-    }
-    if (user.passwordHash !== fakeHash(password)) {
-        throw new Error("비밀번호가 올바르지 않습니다.");
-    }
-    return user;
-};
-
-
-export const getUserData = (email: string): UserData | null => {
-    if (!email) return null;
-    const db = getDb();
-    return db[email] || null;
-};
-
-export const updateUserProgress = (email: string, book: string, newTopic: string) => {
-    if (!email || !book || !newTopic) return;
+export const updateUserProgress = async (userId: string, book: string, newTopic: string, currentProgress: UserProgress): Promise<UserProgress> => {
+    const updatedProgress = { ...currentProgress };
     
-    const db = getDb();
-    const user = db[email];
-    if (!user) return;
-    
-    if (!user.progress[book]) {
-        user.progress[book] = [];
+    if (!updatedProgress[book]) {
+        updatedProgress[book] = [];
     }
     
-    if (!user.progress[book].includes(newTopic)) {
-        user.progress[book].push(newTopic);
+    if (!updatedProgress[book].includes(newTopic)) {
+        updatedProgress[book].push(newTopic);
     }
     
-    saveDb(db);
+    const promise = supabase
+        .from('profiles')
+        .update({ progress: updatedProgress, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+    
+    const { error } = await withTimeout(promise, API_TIMEOUT);
+
+    if (error) {
+        console.error('Error updating progress:', error.message);
+        throw error;
+    }
+    return updatedProgress;
 };
 
-export const saveActiveSession = (email: string, session: LearningSessionState | null) => {
-    if (!email) return;
-    const db = getDb();
-    const user = db[email];
-    if (user) {
-        user.activeLearningSession = session;
-        saveDb(db);
+
+export const saveActiveSession = async (userId: string, session: LearningSessionState | null) => {
+    const promise = supabase
+        .from('profiles')
+        .update({ active_learning_session: session, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+
+    const { error } = await withTimeout(promise, API_TIMEOUT);
+
+    if (error) {
+        console.error('Error saving active session:', error.message);
+        throw error;
     }
 };

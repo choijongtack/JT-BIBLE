@@ -1,3 +1,6 @@
+import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS } from '../constants';
+import type { UserProgress } from '../types';
+
 export interface BookData {
     totalVerses: number;
 }
@@ -31,7 +34,7 @@ export const parseVerseRange = (range: string): number => {
 };
 
 
-export const calculateTotalStudiedVerses = (topics: string[] | undefined): number => {
+export const calculateVersesFromTopics = (topics: string[] | undefined): number => {
     if (!topics) return 0;
     
     return topics.reduce((total, topic) => {
@@ -43,3 +46,21 @@ export const calculateTotalStudiedVerses = (topics: string[] | undefined): numbe
         return total;
     }, 0);
 };
+
+export const getTotalVersesForBooks = (books: string[]): number => {
+    return books.reduce((total, book) => {
+        return total + (BIBLE_BOOK_DATA[book]?.totalVerses || 0);
+    }, 0);
+};
+
+export const getStudiedVersesForBooks = (progress: UserProgress | null | undefined, books: string[]): number => {
+    if (!progress) return 0;
+    return books.reduce((total, book) => {
+        const topics = progress[book];
+        return total + calculateVersesFromTopics(topics);
+    }, 0);
+};
+
+export const TOTAL_BIBLE_VERSES = getTotalVersesForBooks([...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
+export const TOTAL_OT_VERSES = getTotalVersesForBooks(OLD_TESTAMENT_BOOKS);
+export const TOTAL_NT_VERSES = getTotalVersesForBooks(NEW_TESTAMENT_BOOKS);

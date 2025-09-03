@@ -36,7 +36,7 @@ const ProgressTracker: React.FC<{ currentStep: LearningStep }> = ({ currentStep 
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${index <= currentIndex ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400'}`}>
                             {index < currentIndex ? '✔' : index + 1}
                         </div>
-                        <p className={`mt-2 text-xs font-semibold ${index <= currentIndex ? 'text-blue-400' : 'text-slate-500'}`}>{step}</p>
+                        <p className={`mt-2 text-[10px] sm:text-xs font-semibold ${index <= currentIndex ? 'text-blue-400' : 'text-slate-500'}`}>{step}</p>
                     </div>
                     {index < steps.length - 1 && <div className={`flex-1 h-1 mx-2 transition-colors duration-300 ${index < currentIndex ? 'bg-blue-600' : 'bg-slate-700'}`}></div>}
                 </React.Fragment>
@@ -97,7 +97,7 @@ const SystemPromptModal: React.FC<{ isOpen: boolean; onClose: () => void; prompt
 };
 
 const BibleVersePanel: React.FC<{ topic: string, verse: string | null }> = ({ topic, verse }) => (
-    <div className="w-1/3 flex-shrink-0 bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 flex flex-col">
+    <div className="w-full sm:w-1/3 flex-shrink-0 h-64 sm:h-auto bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-700 flex-shrink-0">
             <h2 className="text-xl font-bold text-slate-100">{topic} 본문</h2>
         </div>
@@ -357,7 +357,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
     return (
         quizData ? (
-            <div className="w-full h-[95vh] max-w-7xl mx-auto p-4 sm:p-6 flex items-center justify-center">
+            <div className="w-full max-w-7xl mx-auto p-2 sm:p-6 flex items-center justify-center">
                 <QuizCard
                     question={quizData.questions[currentQuestionIndex]}
                     questionNumber={currentQuestionIndex + 1}
@@ -368,7 +368,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
                 />
             </div>
         ) : (
-            <div className="w-full h-[95vh] max-w-7xl mx-auto p-4 sm:p-6 flex flex-col sm:flex-row gap-6">
+            <div className="w-full h-[95vh] max-w-7xl mx-auto p-2 sm:p-6 flex flex-col sm:flex-row gap-6">
                 <BibleVersePanel topic={topic} verse={bibleVerse} />
 
                 <div className="flex-1 flex flex-col bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 overflow-hidden">

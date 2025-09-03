@@ -1,0 +1,21 @@
+{
+  "name": "성경 공부 도우미: 4단계 학습 방법",
+  "short_name": "성경 공부",
+  "description": "법률가처럼 분석적인 엄격함으로 성경을 공부하고 암기할 수 있도록 돕는 대화형 웹 애플리케이션입니다.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
