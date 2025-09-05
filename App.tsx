@@ -685,7 +685,7 @@ const App: React.FC = () => {
                 setSession(session);
                 setProfile(userProfile);
                 
-                if (userProfile.active_learning_session) {
+                if (userProfile.active_learning_session && Object.keys(userProfile.active_learning_session).length > 0) {
                     setLoadingMessage('진행 중인 학습 세션을 발견했습니다.');
                     setActiveSession(userProfile.active_learning_session);
                     setStatus('session-prompt');
@@ -763,7 +763,7 @@ const App: React.FC = () => {
     const handleStartLearning = async (book: string, aiModel: AiModel, apiKey?: string) => {
         // If an active session exists in the state, and it corresponds to the selected book,
         // simply resume that session instead of creating a new one.
-        if (activeSession && activeSession.topic.startsWith(book)) {
+        if (activeSession && typeof activeSession.topic === 'string' && activeSession.topic.startsWith(book)) {
             setStatus('learning');
             return;
         }
