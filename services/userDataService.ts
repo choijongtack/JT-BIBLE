@@ -4,8 +4,13 @@ import type { User } from '@supabase/supabase-js';
 
 const API_TIMEOUT = 15000; // 15 seconds
 
-// FIX: Changed 'promise' parameter type from 'Promise<T>' to 'PromiseLike<T>'. Supabase query builders are "thenable" (PromiseLike) but not actual Promises. This makes `withTimeout` compatible with them and resolves type errors in this file.
-function withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T> {
+// FIX: The original `withTimeout<T>(promise: PromiseLike<T>)` had trouble with TypeScript's
+// type inference for Supabase's "thenable" query builders. It often inferred `T` as `{}`,
+// causing destructuring errors (e.g., `const { data, error } = ...`).
+// This updated signature uses `<P extends PromiseLike<any>>` and `Promise<Awaited<P>>`.
+// `Awaited<P>` correctly extracts the resolved type from the Supabase promise-like object,
+// ensuring that `data`, `error`, and `status` are known to exist.
+function withTimeout<P extends PromiseLike<any>>(promise: P, ms: number): Promise<Awaited<P>> {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       reject(new Error(
@@ -52,10 +57,24 @@ export const deleteUserAccount = async () => {
         method: 'POST',
     });
 
-    // 기본 오류 객체를 확인합니다 (네트워크 오류, 4xx/5xx 상태 코드 등).
     if (error) {
-        console.error('Error deleting user account (from error object):', error);
-        throw new Error(`계정 삭제에 실패했습니다: ${error.message}`);
+        // 'error'는 FunctionsError입니다. 더 구체적인 메시지를 추출해 봅시다.
+        // 실제 응답 본문은 종종 'context' 속성에 있습니다.
+        const context = (error as any).context;
+        let detailedError = error.message;
+
+        if (context && typeof context.error === 'string') {
+            detailedError = context.error;
+        } else if (context && typeof context.error === 'object' && context.error.message) {
+            detailedError = context.error.message;
+        }
+
+        console.error('Error invoking delete-user function:', {
+            message: error.message,
+            context: context,
+            status: (error as any).status,
+        });
+        throw new Error(`계정 삭제에 실패했습니다: ${detailedError}`);
     }
 
     // 함수가 2xx 상태를 반환했지만 응답 본문에 오류를 포함하는 경우를 대비한 추가 확인.

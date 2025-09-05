@@ -1,5 +1,11 @@
-// FIX: Updated the Deno types reference to use a full URL, which is more reliable for resolving Supabase edge function types and fixing "Cannot find name 'Deno'" errors.
-/// <reference types="https://esm.sh/@supabase/functions-js/src/edge-runtime.d.ts" />
+
+// FIX: Replaced `declare global` with a `declare var` to avoid redeclaration
+// errors for the Deno global in different function files.
+declare var Deno: {
+  env: {
+    get(key: string): string | undefined;
+  };
+};
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -19,6 +25,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const service_role_key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const anon_key = Deno.env.get('SUPABASE_ANON_KEY');
 
     if (!supabaseUrl) {
         throw new Error('SUPABASE_URL이 환경 변수에 설정되지 않았습니다.');
@@ -26,11 +33,14 @@ serve(async (req) => {
     if (!service_role_key) {
         throw new Error('SUPABASE_SERVICE_ROLE_KEY가 환경 변수에 설정되지 않았습니다.');
     }
+    if (!anon_key) {
+        throw new Error('SUPABASE_ANON_KEY가 환경 변수에 설정되지 않았습니다.');
+    }
 
     // 1. 함수를 호출한 사용자의 인증 컨텍스트로 Supabase 클라이언트를 생성합니다.
     const supabaseClient = createClient(
       supabaseUrl,
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      anon_key,
       { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
     );
 

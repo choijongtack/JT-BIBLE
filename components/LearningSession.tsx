@@ -6,7 +6,8 @@ import { LearningStep } from '../constants';
 import type { Quiz, ChatMessage, LearningSessionState, AiModel } from '../types';
 import { QuestionType } from '../types';
 import QuizCard from './QuizCard';
-import type { Chat } from '@google/genai';
+import { decrypt } from '../services/encryptionService';
+import { supabase } from '../services/supabaseClient';
 
 
 interface ConversationalLearningProps {
@@ -113,16 +114,17 @@ const BibleVersePanel: React.FC<{ topic: string, verse: string | null }> = ({ to
 
 
 const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack }) => {
-    const { topic, aiModel, apiKey } = savedSession;
-    const [messages, setMessages] = useState<ChatMessage[]>(savedSession.messages);
+    const { topic, aiModel, apiKey: encryptedApiKey } = savedSession;
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [currentStep, setCurrentStep] = useState<LearningStep>(savedSession.currentStep);
     const [isLoading, setIsLoading] = useState(false);
     const [userInput, setUserInput] = useState('');
-    const [chatSession, setChatSession] = useState<Chat | ChatMessage[] | null>(null);
+    const [chatHistory, setChatHistory] = useState<ChatMessage[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
     const [bibleVerse, setBibleVerse] = useState<string | null>(savedSession.bibleVerse);
     const [isManualMode, setIsManualMode] = useState(false);
+    const [decryptedApiKey, setDecryptedApiKey] = useState<string | undefined>(undefined);
 
     const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(savedSession.currentQuestionIndex);
@@ -140,14 +142,14 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         
         onStateChange({
             ...savedSession,
-            messages,
+            messages: chatHistory || [],
             currentStep,
             bibleVerse,
             quizData,
             currentQuestionIndex,
             score,
         });
-    }, [messages, currentStep, bibleVerse, quizData, currentQuestionIndex, score]);
+    }, [chatHistory, currentStep, bibleVerse, quizData, currentQuestionIndex, score]);
 
     const processAIResponse = useCallback((text: string): string => {
         let cleanedText = text;
@@ -186,22 +188,36 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
             setError(null);
             
             try {
+                let keyToUse = encryptedApiKey;
+                if (encryptedApiKey && (aiModel === 'perplexity' || aiModel === 'chatgpt')) {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session?.access_token) {
+                        throw new Error("API 키를 복호화하기 위한 인증 토큰을 찾을 수 없습니다.");
+                    }
+                    keyToUse = await decrypt(encryptedApiKey, session.access_token);
+                    setDecryptedApiKey(keyToUse);
+                }
+
                 let initialMessage: string | undefined;
-                if (aiModel === 'perplexity' && apiKey) {
-                    const { history, initialMessage: perplexityMessage } = await startPerplexityConversation(topic, apiKey, savedSession.messages);
-                    setChatSession(history);
+                let initialHistory: ChatMessage[];
+                
+                if (aiModel === 'perplexity' && keyToUse) {
+                    const { history, initialMessage: perplexityMessage } = await startPerplexityConversation(topic, keyToUse, savedSession.messages);
+                    initialHistory = history;
                     initialMessage = perplexityMessage;
-                } else if (aiModel === 'chatgpt' && apiKey) {
-                    const { history, initialMessage: gptMessage } = await startChatGptConversation(topic, apiKey, savedSession.messages);
-                    setChatSession(history);
+                } else if (aiModel === 'chatgpt' && keyToUse) {
+                    const { history, initialMessage: gptMessage } = await startChatGptConversation(topic, keyToUse, savedSession.messages);
+                    initialHistory = history;
                     initialMessage = gptMessage;
                 } else {
-                    const { chat, initialMessage: geminiMessage } = await startGeminiConversation(topic, savedSession.messages);
-                    setChatSession(chat);
+                    const { history, initialMessage: geminiMessage } = await startGeminiConversation(topic, savedSession.messages);
+                    initialHistory = history;
                     initialMessage = geminiMessage;
                 }
                 
-                if (initialMessage) {
+                setChatHistory(initialHistory);
+
+                if (initialMessage) { // This is a NEW session
                     const verseMatch = initialMessage.match(/\[BIBLE_VERSE\]([\s\S]*?)\[\/BIBLE_VERSE\]/);
                     let conversationStartMessage = initialMessage;
                     if (verseMatch && verseMatch[1]) {
@@ -213,6 +229,10 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
                     if (cleanedMessage) {
                         setMessages([{ role: 'model', content: cleanedMessage }]);
                     }
+                } else if (savedSession.messages.length > 0) { // This is a RESUMED session
+                    // On resume, find the last message from the AI and show only that one for display.
+                    const lastModelMessage = savedSession.messages.filter(m => m.role === 'model').pop();
+                    setMessages(lastModelMessage ? [lastModelMessage] : savedSession.messages);
                 }
             } catch (e) {
                 setError(e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다');
@@ -223,34 +243,33 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         };
 
         initConversation();
-    }, [topic, aiModel, apiKey]); // This effect should only run when the session fundamentally changes.
+    }, [topic, aiModel]);
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!userInput.trim() || isLoading || !chatSession) return;
+        if (!userInput.trim() || isLoading || !chatHistory) return;
 
         const newUserMessage: ChatMessage = { role: 'user', content: userInput };
-        const updatedMessages = [...messages, newUserMessage];
-        setMessages(updatedMessages);
+        setMessages(prev => [...prev, newUserMessage]);
         
         const currentInput = userInput;
+        const currentHistory = [...chatHistory, newUserMessage];
         setUserInput('');
         setIsLoading(true);
         setError(null);
 
         try {
             let responseText: string;
-             if (aiModel === 'perplexity' && apiKey) {
-                responseText = await continuePerplexityConversation(chatSession as ChatMessage[], currentInput, apiKey);
-                const newModelMessage: ChatMessage = { role: 'model', content: responseText };
-                setChatSession([...(chatSession as ChatMessage[]), newUserMessage, newModelMessage]);
-            } else if (aiModel === 'chatgpt' && apiKey) {
-                responseText = await continueChatGptConversation(chatSession as ChatMessage[], currentInput, apiKey);
-                const newModelMessage: ChatMessage = { role: 'model', content: responseText };
-                setChatSession([...(chatSession as ChatMessage[]), newUserMessage, newModelMessage]);
+            if (aiModel === 'perplexity' && decryptedApiKey) {
+                responseText = await continuePerplexityConversation(chatHistory, currentInput, decryptedApiKey);
+            } else if (aiModel === 'chatgpt' && decryptedApiKey) {
+                responseText = await continueChatGptConversation(chatHistory, currentInput, decryptedApiKey);
             } else {
-                responseText = await continueGeminiConversation(chatSession as Chat, currentInput);
+                responseText = await continueGeminiConversation(chatHistory, currentInput);
             }
+            
+            const newModelMessage: ChatMessage = { role: 'model', content: responseText };
+            setChatHistory([...currentHistory, newModelMessage]);
             
             const cleanedText = processAIResponse(responseText);
             if (cleanedText) {
@@ -259,6 +278,10 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
         } catch (err) {
             setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다');
+            // Restore user input on error
+            setUserInput(currentInput);
+            // Remove the user's message from the display as it failed
+            setMessages(prev => prev.slice(0, -1));
         } finally {
             setIsLoading(false);
         }
@@ -269,12 +292,13 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         const currentIndex = steps.indexOf(currentStep);
         const nextStep = steps[currentIndex + 1];
 
-        if (!nextStep || isLoading || !chatSession) return;
+        if (!nextStep || isLoading || !chatHistory) return;
 
         const forceMessage = `[사용자 액션] '${nextStep}' 단계로 강제 이동합니다. 이 단계에 맞는 질문을 시작해주세요.`;
         
         const newUserMessage: ChatMessage = { role: 'user', content: forceMessage };
         setMessages(prev => [...prev, newUserMessage]);
+        const currentHistory = [...chatHistory, newUserMessage];
         
         setIsLoading(true);
         setError(null);
@@ -282,24 +306,24 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         try {
             let responseText: string;
             
-            if (aiModel === 'perplexity' && apiKey) {
-                responseText = await continuePerplexityConversation(chatSession as ChatMessage[], forceMessage, apiKey);
-                const newModelMessage: ChatMessage = { role: 'model', content: responseText };
-                setChatSession([...(chatSession as ChatMessage[]), newUserMessage, newModelMessage]);
-            } else if (aiModel === 'chatgpt' && apiKey) {
-                responseText = await continueChatGptConversation(chatSession as ChatMessage[], forceMessage, apiKey);
-                const newModelMessage: ChatMessage = { role: 'model', content: responseText };
-                setChatSession([...(chatSession as ChatMessage[]), newUserMessage, newModelMessage]);
+            if (aiModel === 'perplexity' && decryptedApiKey) {
+                responseText = await continuePerplexityConversation(chatHistory, forceMessage, decryptedApiKey);
+            } else if (aiModel === 'chatgpt' && decryptedApiKey) {
+                responseText = await continueChatGptConversation(chatHistory, forceMessage, decryptedApiKey);
             } else {
-                responseText = await continueGeminiConversation(chatSession as Chat, forceMessage);
+                responseText = await continueGeminiConversation(chatHistory, forceMessage);
             }
             
+            const newModelMessage: ChatMessage = { role: 'model', content: responseText };
+            setChatHistory([...currentHistory, newModelMessage]);
+
             const cleanedText = processAIResponse(responseText);
             if (cleanedText) {
                 setMessages(prev => [...prev, { role: 'model', content: cleanedText }]);
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다');
+            setMessages(prev => prev.slice(0, -1)); // Remove the action message on failure
         } finally {
             setIsLoading(false);
         }
@@ -396,7 +420,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
                                 지침 보기
                             </button>
                             <button onClick={onBack} className="px-3 py-1.5 text-xs bg-slate-600 text-white font-semibold rounded-md hover:bg-slate-500 transition-colors">
-                                뒤로가기
+                                학습 저장 및 나가기
                             </button>
                         </div>
                     </div>
