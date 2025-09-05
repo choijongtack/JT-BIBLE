@@ -685,13 +685,25 @@ const App: React.FC = () => {
                 setSession(session);
                 setProfile(userProfile);
                 
-                if (userProfile.active_learning_session && Object.keys(userProfile.active_learning_session).length > 0) {
+                // A more robust check to ensure the session object is valid and has a topic.
+                if (
+                    userProfile.active_learning_session &&
+                    typeof userProfile.active_learning_session === 'object' &&
+                    userProfile.active_learning_session !== null &&
+                    typeof (userProfile.active_learning_session as any).topic === 'string' &&
+                    (userProfile.active_learning_session as any).topic.length > 0
+                ) {
                     setLoadingMessage('진행 중인 학습 세션을 발견했습니다.');
-                    setActiveSession(userProfile.active_learning_session);
+                    setActiveSession(userProfile.active_learning_session as LearningSessionState);
                     setStatus('session-prompt');
                 } else {
                     setLoadingMessage('준비 완료. 환영 화면으로 이동합니다.');
                     setActiveSession(null);
+                    // Proactively clear invalid/empty session data from the database.
+                    if (userProfile.id && userProfile.active_learning_session) {
+                        console.warn("Clearing invalid active session data from profile:", userProfile.active_learning_session);
+                        await saveActiveSession(userProfile.id, null);
+                    }
                     setStatus('idle');
                 }
             } catch (e) {
