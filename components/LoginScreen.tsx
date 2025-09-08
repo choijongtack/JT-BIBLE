@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { testSupabaseConnection } from '../services/supabaseClient';
+import { testSupabaseConnection, type ConnectionTestResult } from '../services/supabaseClient';
+import { IconCheck, IconX } from '../constants';
 
 interface LoginScreenProps {
   onLogin: (email: string, password: string) => Promise<void>;
@@ -15,7 +16,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTesting, setIsTesting] = useState(true); // Start in testing state
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
 
   useEffect(() => {
@@ -172,7 +173,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
         <div className="space-y-4">
             <div className="h-14"> 
               {isTesting && (
-                <div className="p-3 rounded-md text-sm text-center bg-slate-900/50 flex items-center justify-center h-full">
+                <div className="p-3 rounded-md text-sm text-center bg-slate-900/50 flex items-center justify-center h-full animate-pulse">
                   <p className="flex items-center justify-center gap-2 text-slate-400">
                       <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></div>
                       Supabase 연결 상태를 확인하는 중...
@@ -180,8 +181,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
                 </div>
               )}
               {testResult && !isTesting && (
-                <div className={`p-3 rounded-md text-sm text-center flex items-center justify-center h-full ${testResult.includes('성공') ? 'bg-green-900/50 border border-green-700 text-green-300' : 'bg-red-900/50 border border-red-700 text-red-300'}`}>
-                  <p>{testResult}</p>
+                <div className={`p-3 rounded-md text-sm text-center flex items-center justify-center h-full ${testResult.success ? 'bg-green-900/50 border border-green-700' : 'bg-red-900/50 border border-red-700'}`}>
+                   <div className="flex items-center gap-3">
+                    {testResult.success ? <IconCheck className="w-5 h-5 text-green-400 shrink-0" /> : <IconX className="w-5 h-5 text-red-400 shrink-0" />}
+                    <p className={`${testResult.success ? 'text-green-300' : 'text-red-300'}`}>{testResult.message}</p>
+                  </div>
                 </div>
               )}
             </div>

@@ -222,29 +222,27 @@ const WelcomeScreen: React.FC<{
 
     return (
         <div className="w-full max-w-4xl mx-auto bg-slate-800/50 p-4 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
-            <header className="flex items-start mb-8">
-                <div className="flex-1">
-                    {/* Left spacer */}
+            <header className="flex flex-col items-center sm:flex-row sm:justify-between mb-8">
+                <div className="hidden sm:block sm:flex-1">
+                    {/* Spacer */}
                 </div>
-                <div className="text-center px-2">
+                <div className="text-center">
                     <h1 className="text-3xl sm:text-4xl font-bold text-slate-100">성경 공부 도우미</h1>
                     <p className="text-lg text-slate-300 mt-1">변호사의 방법</p>
                 </div>
-                <div className="flex-1 flex justify-end">
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                        <button
-                            onClick={onDelete}
-                            className="px-4 py-2 text-red-400 font-semibold rounded-lg hover:bg-red-900/50 hover:text-red-300 transition-colors text-sm"
-                        >
-                            회원 탈퇴
-                        </button>
-                        <button
-                            onClick={onLogout}
-                            className="px-4 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors text-sm"
-                        >
-                            로그아웃
-                        </button>
-                    </div>
+                <div className="flex items-center gap-2 flex-shrink-0 mt-4 sm:mt-0 sm:flex-1 sm:justify-end">
+                    <button
+                        onClick={onDelete}
+                        className="px-4 py-2 text-red-400 font-semibold rounded-lg hover:bg-red-900/50 hover:text-red-300 transition-colors text-sm"
+                    >
+                        회원 탈퇴
+                    </button>
+                    <button
+                        onClick={onLogout}
+                        className="px-4 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors text-sm"
+                    >
+                        로그아웃
+                    </button>
                 </div>
             </header>
             
@@ -665,11 +663,13 @@ const App: React.FC = () => {
             setLoadingMessage('세션 확인됨. 프로필 조회 시도 중...');
             setAuthError(null);
             try {
-                let userProfile = await getProfile(session.user);
+// FIX: The `getProfile` function now gets the user from the session internally and does not accept arguments.
+                let userProfile = await getProfile();
                 
                 if (!userProfile) {
                     setLoadingMessage('기존 프로필 없음. 신규 프로필 생성 시도 중...');
-                    userProfile = await createProfile(session.user.id, session.user.email);
+// FIX: The `createProfile` function now only accepts an optional email argument. The user ID is retrieved from the session internally.
+                    userProfile = await createProfile(session.user.email);
                     if (userProfile) {
                         setLoadingMessage('신규 프로필 생성 성공.');
                     }
@@ -702,7 +702,8 @@ const App: React.FC = () => {
                     // Proactively clear invalid/empty session data from the database.
                     if (userProfile.id && userProfile.active_learning_session) {
                         console.warn("Clearing invalid active session data from profile:", userProfile.active_learning_session);
-                        await saveActiveSession(userProfile.id, null);
+// FIX: The `saveActiveSession` function now gets the user ID from the session internally and only accepts the session data object.
+                        await saveActiveSession(null);
                     }
                     setStatus('idle');
                 }
@@ -845,8 +846,8 @@ const App: React.FC = () => {
         try {
             // Only update progress if the test wasn't skipped
             if(score >= 0) {
+// FIX: The `updateUserProgress` function no longer accepts the user ID as the first argument.
                 const newProgress = await updateUserProgress(
-                    profile.id,
                     activeSession.topic.split(' ')[0],
                     activeSession.topic,
                     profile.progress
@@ -862,7 +863,8 @@ const App: React.FC = () => {
         setLastScore({ score, total, topic: activeSession.topic, aiModel: activeSession.aiModel, apiKey: activeSession.apiKey });
         setActiveSession(null);
         if (profile?.id) {
-            await saveActiveSession(profile.id, null);
+// FIX: The `saveActiveSession` function now gets the user ID from the session internally and only accepts the session data object.
+            await saveActiveSession(null);
         }
         setStatus('finished');
     }, [activeSession, profile]);
@@ -915,7 +917,8 @@ const App: React.FC = () => {
     const handleStateChange = useCallback(async (newState: LearningSessionState) => {
         setActiveSession(newState);
         if (profile?.id) {
-            await saveActiveSession(profile.id, newState);
+// FIX: The `saveActiveSession` function now gets the user ID from the session internally and only accepts the session data object.
+            await saveActiveSession(newState);
         }
     }, [profile?.id]);
 
