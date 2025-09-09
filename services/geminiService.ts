@@ -132,7 +132,7 @@ export const startLearningConversation = async (topic: string, history: ChatMess
 
         const payload = {
             contents: toGeminiHistory([initialUserMessage]),
-            system_instruction: { // Gemini REST API uses 'system_instruction' with an underscore
+            systemInstruction: { // The Gemini REST API uses 'systemInstruction' (camelCase).
                 parts: [{ text: systemInstruction }]
             }
         };
@@ -160,7 +160,7 @@ export const continueLearningConversation = async (currentHistory: ChatMessage[]
         
         const payload = {
             contents: toGeminiHistory([...currentHistory, newUserMessage]),
-            system_instruction: {
+            systemInstruction: { // The Gemini REST API uses 'systemInstruction' (camelCase).
                 parts: [{ text: systemInstruction }]
             }
         };

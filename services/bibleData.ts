@@ -12,55 +12,14 @@ export const BIBLE_BOOK_DATA: Record<string, BookData> = {
     '마태복음': { totalVerses: 1071 }, '마가복음': { totalVerses: 678 }, '누가복음': { totalVerses: 1151 }, '요한복음': { totalVerses: 879 }, '사도행전': { totalVerses: 1007 }, '로마서': { totalVerses: 433 }, '고린도전서': { totalVerses: 437 }, '고린도후서': { totalVerses: 257 }, '갈라디아서': { totalVerses: 149 }, '에베소서': { totalVerses: 155 }, '빌립보서': { totalVerses: 104 }, '골로새서': { totalVerses: 95 }, '데살로니가전서': { totalVerses: 89 }, '데살로니가후서': { totalVerses: 47 }, '디모데전서': { totalVerses: 113 }, '디모데후서': { totalVerses: 83 }, '디도서': { totalVerses: 46 }, '빌레몬서': { totalVerses: 25 }, '히브리서': { totalVerses: 303 }, '야고보서': { totalVerses: 108 }, '베드로전서': { totalVerses: 105 }, '베드로후서': { totalVerses: 61 }, '요한1서': { totalVerses: 105 }, '요한2서': { totalVerses: 13 }, '요한3서': { totalVerses: 14 }, '유다서': { totalVerses: 25 }, '요한계시록': { totalVerses: 404 }
 };
 
-export const parseVerseRange = (range: string): number => {
-    // Handles formats like "1:3-7" (5 verses) and "1:3" (1 verse)
-    if (!range) return 0;
-    const chapterAndVerse = range.split(':');
-    if (chapterAndVerse.length !== 2) return 0; // malformed
-
-    const versePart = chapterAndVerse[1];
-    const verseNumbers = versePart.split('-').map(v => parseInt(v, 10));
-
-    if (verseNumbers.some(isNaN)) return 0; // malformed number
-
-    if (verseNumbers.length === 1) {
-        return 1;
-    } else if (verseNumbers.length === 2) {
-        const count = verseNumbers[1] - verseNumbers[0] + 1;
-        return count > 0 ? count : 0;
-    }
-
-    return 0;
-};
-
-
-export const calculateVersesFromTopics = (topics: string[] | undefined): number => {
-    if (!topics) return 0;
-    
-    return topics.reduce((total, topic) => {
-        // Assumes topic is "Book Chapter:Verse-Verse", e.g., "에베소서 1:1-14"
-        const rangeMatch = topic.match(/\d+:\d+(-\d+)?$/);
-        if (rangeMatch) {
-            return total + parseVerseRange(rangeMatch[0]);
-        }
-        return total;
-    }, 0);
-};
-
-export const getTotalVersesForBooks = (books: string[]): number => {
-    return books.reduce((total, book) => {
-        return total + (BIBLE_BOOK_DATA[book]?.totalVerses || 0);
-    }, 0);
-};
-
-export const getStudiedVersesForBooks = (progress: UserProgress | null | undefined, books: string[]): number => {
+export const getStudiedBookCountForList = (progress: UserProgress | null | undefined, books: string[]): number => {
     if (!progress) return 0;
-    return books.reduce((total, book) => {
-        const topics = progress[book];
-        return total + calculateVersesFromTopics(topics);
+    
+    return books.reduce((count, book) => {
+        // If there's an entry for the book (a last studied topic string), it counts as studied.
+        if (progress[book]) {
+            return count + 1;
+        }
+        return count;
     }, 0);
 };
-
-export const TOTAL_BIBLE_VERSES = getTotalVersesForBooks([...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
-export const TOTAL_OT_VERSES = getTotalVersesForBooks(OLD_TESTAMENT_BOOKS);
-export const TOTAL_NT_VERSES = getTotalVersesForBooks(NEW_TESTAMENT_BOOKS);

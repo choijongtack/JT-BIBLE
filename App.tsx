@@ -1,13 +1,15 @@
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { AppStatus, LearningSessionState, AiModel, Profile } from './types';
 import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX, LearningStep } from './constants';
 import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
+import ProgressDebugPanel from './components/ProgressDebugPanel';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic, testPerplexityApiKey } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic, testChatGptApiKey } from './services/chatgptService';
-import { loginUser, registerUser, getProfile, updateUserProgress, saveActiveSession, logoutUser, createProfile, deleteUserAccount } from './services/userDataService';
-import { BIBLE_BOOK_DATA, calculateVersesFromTopics, getStudiedVersesForBooks, TOTAL_BIBLE_VERSES, TOTAL_OT_VERSES, TOTAL_NT_VERSES } from './services/bibleData';
+import { loginUser, registerUser, getProfile, updateUserProgress, saveActiveSession, logoutUser, createProfile, deleteUserAccount, testUpdateProgress } from './services/userDataService';
+import { getStudiedBookCountForList } from './services/bibleData';
 import { supabase } from './services/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
 import { encrypt, decrypt } from './services/encryptionService';
@@ -20,7 +22,8 @@ const WelcomeScreen: React.FC<{
     userProgress: Profile['progress'] | null;
     onLogout: () => void;
     onDelete: () => void;
-}> = ({ onStart, userProgress, onLogout, onDelete }) => {
+    onTestUpdate: () => void;
+}> = ({ onStart, userProgress, onLogout, onDelete, onTestUpdate }) => {
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
     
@@ -156,25 +159,21 @@ const WelcomeScreen: React.FC<{
     };
 
     const BookButton: React.FC<{ book: string }> = ({ book }) => {
-        const studiedTopics = userProgress?.[book] || [];
-        const studiedVerses = calculateVersesFromTopics(studiedTopics);
-        const totalVerses = BIBLE_BOOK_DATA[book]?.totalVerses || 0;
-        const progressPercent = totalVerses > 0 ? Math.min(100, Math.round((studiedVerses / totalVerses) * 100)) : 0;
         const isSelected = selectedBook === book;
+        const isStudied = !!userProgress?.[book];
 
         return (
             <button
                 onClick={() => setSelectedBook(book)}
-                className={`relative w-full text-center px-2 py-2 rounded-md transition-colors text-sm overflow-hidden group ${
+                className={`relative w-full text-center px-2 py-2 rounded-md transition-colors text-sm group ${
                     isSelected
                         ? 'bg-blue-600 text-white font-bold'
+                        : isStudied 
+                        ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 ring-1 ring-blue-500/50'
                         : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
                 }`}
             >
-                <div 
-                    className={`absolute top-0 left-0 h-full transition-all duration-300 ${isSelected ? 'bg-blue-700/50' : 'bg-slate-600/70'}`}
-                    style={{ width: `${progressPercent}%` }}
-                ></div>
+                {isStudied && <IconCheck className="absolute top-1 right-1 w-3.5 h-3.5 text-blue-400" />}
                 <span className="relative z-10">{book}</span>
             </button>
         );
@@ -193,31 +192,30 @@ const WelcomeScreen: React.FC<{
         }
     }
     
-    const ProgressBar: React.FC<{ label: string, progress: number, studied: number, total: number }> = ({ label, progress, studied, total }) => (
-        <div>
-            <div className="flex justify-between items-center text-sm mb-1 text-slate-300">
-                <span>{label}</span>
-                <span>{Math.round(progress)}%</span>
+    const StatProgressBar: React.FC<{ label: string, studied: number, total: number, unit: string }> = ({ label, studied, total, unit }) => {
+        const progress = total > 0 ? (studied / total) * 100 : 0;
+        return (
+            <div>
+                <div className="flex justify-between items-center text-sm mb-1 text-slate-300">
+                    <span>{label}</span>
+                    <span>{Math.round(progress)}%</span>
+                </div>
+                <div className="w-full bg-slate-700 rounded-full h-2.5">
+                    <div 
+                        className="bg-blue-600 h-2.5 rounded-full" 
+                        style={{ width: `${progress}%` }}
+                    ></div>
+                </div>
+                <p className="text-right text-xs text-slate-400 mt-1">
+                    {studied.toLocaleString()} / {total.toLocaleString()}{unit}
+                </p>
             </div>
-            <div className="w-full bg-slate-700 rounded-full h-2.5">
-                <div 
-                    className="bg-blue-600 h-2.5 rounded-full" 
-                    style={{ width: `${progress}%` }}
-                ></div>
-            </div>
-            <p className="text-right text-xs text-slate-400 mt-1">
-                {studied.toLocaleString()} / {total.toLocaleString()}절
-            </p>
-        </div>
-    );
+        );
+    };
 
-    const totalStudied = getStudiedVersesForBooks(userProgress, [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
-    const otStudied = getStudiedVersesForBooks(userProgress, OLD_TESTAMENT_BOOKS);
-    const ntStudied = getStudiedVersesForBooks(userProgress, NEW_TESTAMENT_BOOKS);
-
-    const totalProgress = TOTAL_BIBLE_VERSES > 0 ? (totalStudied / TOTAL_BIBLE_VERSES) * 100 : 0;
-    const otProgress = TOTAL_OT_VERSES > 0 ? (otStudied / TOTAL_OT_VERSES) * 100 : 0;
-    const ntProgress = TOTAL_NT_VERSES > 0 ? (ntStudied / TOTAL_NT_VERSES) * 100 : 0;
+    const totalStudiedCount = getStudiedBookCountForList(userProgress, [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
+    const otStudiedCount = getStudiedBookCountForList(userProgress, OLD_TESTAMENT_BOOKS);
+    const ntStudiedCount = getStudiedBookCountForList(userProgress, NEW_TESTAMENT_BOOKS);
 
 
     return (
@@ -231,6 +229,12 @@ const WelcomeScreen: React.FC<{
                     <p className="text-lg text-slate-300 mt-1">변호사의 방법</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 mt-4 sm:mt-0 sm:flex-1 sm:justify-end">
+                    <button
+                        onClick={onTestUpdate}
+                        className="px-4 py-2 text-yellow-400 font-semibold rounded-lg hover:bg-yellow-900/50 hover:text-yellow-300 transition-colors text-sm"
+                    >
+                        업데이트 테스트
+                    </button>
                     <button
                         onClick={onDelete}
                         className="px-4 py-2 text-red-400 font-semibold rounded-lg hover:bg-red-900/50 hover:text-red-300 transition-colors text-sm"
@@ -249,25 +253,25 @@ const WelcomeScreen: React.FC<{
             <p className="text-slate-400 text-center mb-8">공부하고 싶은 성경을 선택하고 학습을 시작하세요.</p>
             
             <div className="mb-8 px-4 sm:px-0">
-                <h3 className="text-xl font-semibold text-slate-200 mb-4 text-center">전체 학습 진도율</h3>
+                <h3 className="text-xl font-semibold text-slate-200 mb-4 text-center">전체 학습 진행률 (학습한 책 기준)</h3>
                 <div className="bg-slate-900/50 p-4 rounded-lg grid grid-cols-1 sm:grid-cols-3 gap-6">
-                    <ProgressBar 
+                    <StatProgressBar 
                         label="성경 전체" 
-                        progress={totalProgress}
-                        studied={totalStudied}
-                        total={TOTAL_BIBLE_VERSES}
+                        studied={totalStudiedCount}
+                        total={66}
+                        unit="권"
                     />
-                    <ProgressBar 
+                    <StatProgressBar 
                         label="구약" 
-                        progress={otProgress}
-                        studied={otStudied}
-                        total={TOTAL_OT_VERSES}
+                        studied={otStudiedCount}
+                        total={39}
+                        unit="권"
                     />
-                    <ProgressBar 
+                    <StatProgressBar 
                         label="신약" 
-                        progress={ntProgress}
-                        studied={ntStudied}
-                        total={TOTAL_NT_VERSES}
+                        studied={ntStudiedCount}
+                        total={27}
+                        unit="권"
                     />
                 </div>
             </div>
@@ -373,32 +377,19 @@ const WelcomeScreen: React.FC<{
                         </div>
                     )}
 
-                    <div className="text-center mb-4 space-y-2 w-full">
-                        {selectedBook && userProgress && BIBLE_BOOK_DATA[selectedBook] && (
-                            <div className="w-full max-w-sm mx-auto bg-slate-900/50 p-3 rounded-lg">
-                                <div className="flex justify-between items-center text-sm mb-1 text-slate-300">
-                                    <span>{selectedBook} 학습 진도율</span>
-                                    <span>
-                                        {(() => {
-                                            const total = BIBLE_BOOK_DATA[selectedBook]?.totalVerses || 0;
-                                            const studied = calculateVersesFromTopics(userProgress[selectedBook]);
-                                            return total > 0 ? `${Math.round((studied / total) * 100)}%` : '0%';
-                                        })()}
-                                    </span>
-                                </div>
-                                <div className="w-full bg-slate-700 rounded-full h-2.5">
-                                    <div 
-                                        className="bg-blue-600 h-2.5 rounded-full" 
-                                        style={{ width: `${(() => {
-                                            const total = BIBLE_BOOK_DATA[selectedBook]?.totalVerses || 0;
-                                            const studied = calculateVersesFromTopics(userProgress[selectedBook]);
-                                            return total > 0 ? Math.round((studied / total) * 100) : 0;
-                                        })()}%`}}
-                                    ></div>
-                                </div>
-                                <p className="text-right text-xs text-slate-400 mt-1">
-                                    {calculateVersesFromTopics(userProgress[selectedBook])} / {BIBLE_BOOK_DATA[selectedBook].totalVerses}절
-                                </p>
+                    <div className="text-center mb-4 space-y-2 w-full h-16">
+                         {selectedBook && (
+                            <div className="w-full max-w-sm mx-auto bg-slate-900/50 p-3 rounded-lg animate-fade-in">
+                                <p className="text-sm text-slate-300 font-semibold mb-1">{selectedBook}</p>
+                                {/* FIX: Safely access and split the topic to prevent crashes on corrupt data. */}
+                                {userProgress?.[selectedBook] && typeof userProgress[selectedBook].topic === 'string' && userProgress[selectedBook].topic ? (
+                                    <div>
+                                        <span className="text-xs text-slate-400">최근 학습: </span>
+                                        <span className="font-mono text-blue-300 text-sm">{userProgress[selectedBook].topic.split(' ')[1] || ''}</span>
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-400 text-sm">아직 학습 기록이 없습니다.</p>
+                                )}
                             </div>
                         )}
                     </div>
@@ -412,6 +403,15 @@ const WelcomeScreen: React.FC<{
                     </button>
                 </div>
             </div>
+            <style>{`
+                @keyframes fade-in {
+                    from { opacity: 0; transform: translateY(10px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .animate-fade-in {
+                    animation: fade-in 0.3s ease-out forwards;
+                }
+            `}</style>
         </div>
     );
 };
@@ -444,41 +444,81 @@ const ResumeSessionPrompt: React.FC<{
 );
 
 
-const ResultsScreen: React.FC<{ 
-    score: number; 
-    total: number; 
+const ResultsScreen: React.FC<{
+    lastResult: {
+        score: number;
+        total: number;
+        topic: string;
+        exitType: 'quiz' | 'save';
+    };
     onRestart: () => void;
-    onContinue: () => void;
-    topic: string;
-}> = ({ score, total, onRestart, onContinue, topic }) => {
-    const bookName = topic.split(' ')[0] || '성경';
-    const isSkipped = score < 0;
+    onContinue: (book: string) => void;
+    progressDebugInfo: {
+        before: Profile['progress'] | null;
+        request: Profile['progress'] | null;
+        after: Profile['progress'] | null;
+        error: string | null;
+    } | null;
+}> = ({ lastResult, onRestart, onContinue, progressDebugInfo }) => {
+    const { score, total, topic, exitType } = lastResult;
+    // FIX: Safely derive bookName to prevent crash if topic is undefined or not a string.
+    const bookName = (topic && typeof topic === 'string' ? topic.split(' ')[0] : null) || '성경';
+    const isSkipped = score < 0 && exitType === 'quiz';
+    const isSaveAndExit = exitType === 'save';
+
+    const getTitle = () => {
+        if (isSaveAndExit) return '학습 내용 저장 완료';
+        if (isSkipped) return '시험을 건너뛰었습니다';
+        return '학습 완료!';
+    };
 
     return (
         <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
             <h2 className="text-3xl font-bold text-slate-100 mb-4">
-                {isSkipped ? '시험을 건너뛰었습니다' : '학습 완료!'}
+                {getTitle()}
             </h2>
-            <p className="text-slate-300 text-lg mb-2">
-                {isSkipped ? `현재 주제: ${topic}` : '시험 점수:'}
-            </p>
-            {!isSkipped && (
-                 <p className="text-5xl font-bold text-blue-400 mb-8">{score} / {total}</p>
+
+            {isSaveAndExit ? (
+                <p className="text-slate-300 text-lg mb-2">
+                    <span className="font-bold text-blue-400">{topic}</span>에 대한 학습 내용이<br />성공적으로 저장되었습니다.
+                </p>
+            ) : (
+                <>
+                    <p className="text-slate-300 text-lg mb-2">
+                        {isSkipped ? `현재 주제: ${topic}` : '시험 점수:'}
+                    </p>
+                    {!isSkipped && (
+                        <p className="text-5xl font-bold text-blue-400 mb-8">{score} / {total}</p>
+                    )}
+                </>
             )}
+
             <div className="flex flex-col gap-4 mt-8">
-                 <button
-                    onClick={onContinue}
-                    className="w-full px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-500 transition-all transform hover:scale-105"
-                >
-                    {bookName} 계속 공부하기
-                </button>
-                <button
-                    onClick={onRestart}
-                    className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all"
-                >
-                    다른 책 공부하기
-                </button>
+                {isSaveAndExit ? (
+                    <button
+                        onClick={onRestart} // onRestart goes back to idle screen
+                        className="w-full px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-500 transition-all"
+                    >
+                        메인 화면으로 돌아가기
+                    </button>
+                ) : (
+                    <>
+                        <button
+                            onClick={() => onContinue(bookName)}
+                            className="w-full px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-500 transition-all transform hover:scale-105"
+                        >
+                            {bookName} 계속 공부하기
+                        </button>
+                        <button
+                            onClick={onRestart}
+                            className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all"
+                        >
+                            다른 책 공부하기
+                        </button>
+                    </>
+                )}
             </div>
+            <ProgressDebugPanel debugInfo={progressDebugInfo} />
         </div>
     );
 };
@@ -625,11 +665,22 @@ const App: React.FC = () => {
     const [session, setSession] = useState<Session | null>(null);
     const [profile, setProfile] = useState<Profile | null>(null);
     const [activeSession, setActiveSession] = useState<LearningSessionState | null>(null);
-    const [lastScore, setLastScore] = useState<{ score: number, total: number, topic: string, aiModel: AiModel, apiKey?: string }>({ score: 0, total: 0, topic: '', aiModel: 'gemini', apiKey: undefined });
+    const [lastSessionResult, setLastSessionResult] = useState<{
+        score: number;
+        total: number;
+        topic: string;
+        exitType: 'quiz' | 'save';
+    }>({ score: 0, total: 0, topic: '', exitType: 'quiz' });
     const [error, setError] = useState<string | null>(null);
     const [authError, setAuthError] = useState<string | null>(null);
     const [loadingMessage, setLoadingMessage] = useState<string>('앱을 초기화하고 Supabase에 연결하는 중...');
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+    const [progressDebugInfo, setProgressDebugInfo] = useState<{
+        before: Profile['progress'] | null;
+        request: Profile['progress'] | null;
+        after: Profile['progress'] | null;
+        error: string | null;
+    } | null>(null);
     
     const statusRef = useRef(status);
     useEffect(() => {
@@ -710,6 +761,10 @@ const App: React.FC = () => {
             } catch (e) {
                 const errorMessage = e instanceof Error ? e.message : "프로필을 로드하는 동안 알 수 없는 오류가 발생했습니다.";
                 console.error("Profile loading/creation failed:", errorMessage);
+                
+                // UNIFIED BEHAVIOR: Always show the profile error screen on failure.
+                // This prevents a jarring logout loop if the profile fetch times out due to RLS issues.
+                // The ProfileErrorScreen component is already equipped to display RLS instructions for timeout errors.
                 setError(errorMessage);
                 setStatus('profile_error');
             }
@@ -773,151 +828,181 @@ const App: React.FC = () => {
         setIsDeleteConfirmOpen(true);
     }, [profile]);
     
-    const handleStartLearning = async (book: string, aiModel: AiModel, apiKey?: string) => {
-        // If an active session exists in the state, and it corresponds to the selected book,
-        // simply resume that session instead of creating a new one.
-        if (activeSession && typeof activeSession.topic === 'string' && activeSession.topic.startsWith(book)) {
-            setStatus('learning');
-            return;
-        }
-
+    // FIX: Made the `aiModel` parameter optional to align with the `onContinue` prop type in `ResultsScreen`,
+    // which only passes the book name. The internal logic already correctly uses the saved session's AI model
+    // when continuing a book.
+    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, apiKey?: string) => {
         setStatus('loading');
         setError(null);
-        
-        try {
-            let topic: string;
-            const bookProgress = profile?.progress?.[book];
 
-            if (bookProgress && bookProgress.length > 0) {
-                // User has progress, get the next topic
-                const lastStudiedTopic = bookProgress[bookProgress.length - 1];
-                setLoadingMessage(`'${lastStudiedTopic}' 이후의 학습 주제를 찾는 중...`);
-                
-                if (aiModel === 'perplexity' && apiKey) {
-                    topic = await getNextPerplexityStudyTopic(lastStudiedTopic, apiKey);
-                } else if (aiModel === 'chatgpt' && apiKey) {
-                    topic = await getNextChatGptStudyTopic(lastStudiedTopic, apiKey);
+        try {
+            let savedSession = profile?.progress?.[book];
+
+            // FIX: Defensively check for a valid topic in the saved session to prevent crashes.
+            if (savedSession && (typeof savedSession.topic !== 'string' || !savedSession.topic)) {
+                console.warn(`Saved session for "${book}" is missing a valid topic. A new session will be started.`, savedSession);
+                savedSession = undefined; // Treat as if no session was saved.
+            }
+
+            let sessionToStart: LearningSessionState;
+
+            if (savedSession) {
+                if (savedSession.isComplete) {
+                    setLoadingMessage(`'${savedSession.topic}' 이후의 학습 주제를 찾는 중...`);
+                    let plainApiKey: string | undefined = savedSession.apiKey;
+                    if (plainApiKey && (savedSession.aiModel === 'perplexity' || savedSession.aiModel === 'chatgpt')) {
+                        if (!session?.access_token) throw new Error("API 키를 복호화하기 위한 인증 토큰을 찾을 수 없습니다.");
+                        plainApiKey = await decrypt(plainApiKey, session.access_token);
+                    }
+
+                    let nextTopic: string;
+                     if (savedSession.aiModel === 'perplexity' && plainApiKey) {
+                        nextTopic = await getNextPerplexityStudyTopic(savedSession.topic, plainApiKey);
+                    } else if (savedSession.aiModel === 'chatgpt' && plainApiKey) {
+                        nextTopic = await getNextChatGptStudyTopic(savedSession.topic, plainApiKey);
+                    } else {
+                        nextTopic = await getNextGeminiStudyTopic(savedSession.topic);
+                    }
+                    
+                    sessionToStart = {
+                        topic: nextTopic,
+                        currentStep: LearningStep.ANALYSIS,
+                        messages: [],
+                        aiModel: savedSession.aiModel,
+                        apiKey: savedSession.apiKey,
+                        bibleVerse: null,
+                        score: 0,
+                        quizData: null,
+                        currentQuestionIndex: 0
+                    };
+
                 } else {
-                    topic = await getNextGeminiStudyTopic(lastStudiedTopic);
+                    setLoadingMessage(`'${savedSession.topic}' 학습을 다시 시작합니다...`);
+                    sessionToStart = savedSession;
                 }
             } else {
-                // No progress, get the first topic
                 setLoadingMessage(`'${book}'의 첫 학습 주제를 찾는 중...`);
-
+                 let firstTopic: string;
                 if (aiModel === 'perplexity' && apiKey) {
-                    topic = await getPerplexityStudyTopic(book, apiKey);
+                    firstTopic = await getPerplexityStudyTopic(book, apiKey);
                 } else if (aiModel === 'chatgpt' && apiKey) {
-                    topic = await getChatGptStudyTopic(book, apiKey);
+                    firstTopic = await getChatGptStudyTopic(book, apiKey);
                 } else {
-                    topic = await getGeminiStudyTopic(book);
+                    firstTopic = await getGeminiStudyTopic(book);
                 }
+                
+                let encryptedApiKey: string | undefined = apiKey;
+                if (apiKey && (aiModel === 'perplexity' || aiModel === 'chatgpt')) {
+                    if (!session?.access_token) throw new Error("API 키를 암호화하기 위한 인증 토큰을 찾을 수 없습니다.");
+                    encryptedApiKey = await encrypt(apiKey, session.access_token);
+                }
+
+                sessionToStart = {
+                    topic: firstTopic,
+                    currentStep: LearningStep.ANALYSIS,
+                    messages: [],
+                    // FIX: Default to 'gemini' if aiModel is not provided, ensuring type safety for `LearningSessionState`.
+                    aiModel: aiModel || 'gemini',
+                    apiKey: encryptedApiKey,
+                    bibleVerse: null,
+                    score: 0,
+                    quizData: null,
+                    currentQuestionIndex: 0
+                };
             }
             
-            let encryptedApiKey: string | undefined = apiKey;
-            if (apiKey && (aiModel === 'perplexity' || aiModel === 'chatgpt')) {
-                if (!session?.access_token) {
-                    throw new Error("API 키를 암호화하기 위한 인증 토큰을 찾을 수 없습니다.");
-                }
-                encryptedApiKey = await encrypt(apiKey, session.access_token);
-            }
-            
-            const newSession: LearningSessionState = {
-                topic,
-                currentStep: LearningStep.ANALYSIS,
-                messages: [],
-                aiModel: aiModel,
-                apiKey: encryptedApiKey,
-                bibleVerse: null,
-                score: 0,
-                quizData: null,
-                currentQuestionIndex: 0
-            };
-            setActiveSession(newSession);
+            setActiveSession(sessionToStart);
             setStatus('learning');
+
         } catch (e) {
             setError(e instanceof Error ? e.message : '학습 세션을 시작하는 데 실패했습니다.');
             setStatus('error');
         }
-    };
+    }, [profile, session]);
 
     const handleFinishLearning = useCallback(async (score: number, total: number) => {
-        if (!activeSession || !profile) return;
-
-        try {
-            // Only update progress if the test wasn't skipped
-            if(score >= 0) {
-// FIX: The `updateUserProgress` function no longer accepts the user ID as the first argument.
-                const newProgress = await updateUserProgress(
-                    activeSession.topic.split(' ')[0],
-                    activeSession.topic,
-                    profile.progress
-                );
-                setProfile(prev => prev ? { ...prev, progress: newProgress } : null);
-            }
-        } catch (e) {
-             setError(e instanceof Error ? e.message : '진행 상황을 업데이트하는 데 실패했습니다.');
-             setStatus('error');
-             return; // Stop execution if progress fails to save
+        // FIX: Add a robust guard to ensure activeSession and its topic are valid before proceeding.
+        if (!activeSession || !profile || typeof activeSession.topic !== 'string' || !activeSession.topic) {
+            console.error("handleFinishLearning called with invalid activeSession or missing topic.", activeSession);
+            setError("학습 세션을 완료할 수 없습니다: 유효하지 않은 세션 데이터입니다.");
+            setStatus('error');
+            return;
         }
+
+        setProgressDebugInfo(null); 
+
+        const match = activeSession.topic.match(/^[가-힣]+/);
+        const book = match ? match[0] : activeSession.topic;
         
-        setLastScore({ score, total, topic: activeSession.topic, aiModel: activeSession.aiModel, apiKey: activeSession.apiKey });
+        const sessionToSave = { ...activeSession, isComplete: true };
+        const result = await updateUserProgress(book, sessionToSave);
+        setProgressDebugInfo(result);
+
+        if (result.error || !result.after) {
+            const errorMessage = result.error || '진행 상황을 업데이트하는 데 실패했습니다.';
+            setError(errorMessage);
+            setStatus('error');
+            return;
+        }
+
+        setProfile(prev => prev ? { ...prev, progress: result.after } : null);
+        
+        setLastSessionResult({ score, total, topic: activeSession.topic, exitType: 'quiz' });
         setActiveSession(null);
         if (profile?.id) {
-// FIX: The `saveActiveSession` function now gets the user ID from the session internally and only accepts the session data object.
+            await saveActiveSession(null);
+        }
+        setStatus('finished');
+    }, [activeSession, profile]);
+    
+    const handleSaveAndExit = useCallback(async () => {
+        // FIX: Add a robust guard to ensure activeSession and its topic are valid, failing gracefully if not.
+        if (!activeSession || !profile || typeof activeSession.topic !== 'string' || !activeSession.topic) {
+            console.error("handleSaveAndExit called with invalid activeSession or missing topic.", activeSession);
+            // Fail gracefully by returning to the main menu without saving.
+            setStatus('idle');
+            setActiveSession(null);
+            if (profile?.id) {
+                await saveActiveSession(null);
+            }
+            return;
+        }
+
+        setProgressDebugInfo(null);
+
+        const match = activeSession.topic.match(/^[가-힣]+/);
+        const book = match ? match[0] : activeSession.topic;
+
+        const sessionToSave = { ...activeSession, isComplete: false };
+        const result = await updateUserProgress(book, sessionToSave);
+        setProgressDebugInfo(result);
+
+        if (result.error || !result.after) {
+            const errorMessage = result.error || '진행 상황을 업데이트하는 데 실패했습니다.';
+            setError(errorMessage);
+            setStatus('error');
+            return;
+        }
+
+        setProfile(prev => prev ? { ...prev, progress: result.after } : null);
+
+        setLastSessionResult({
+            score: -1, 
+            total: 0,
+            topic: activeSession.topic,
+            exitType: 'save'
+        });
+
+        setActiveSession(null);
+        if (profile?.id) {
             await saveActiveSession(null);
         }
         setStatus('finished');
     }, [activeSession, profile]);
 
-    const handleContinueLearning = useCallback(async () => {
-        setStatus('loading');
-        setLoadingMessage(`'${lastScore.topic}' 이후의 학습 주제를 찾는 중...`);
-        setError(null);
-        try {
-            const bookName = lastScore.topic.split(' ')[0];
-            if (!bookName) throw new Error("책 이름을 찾을 수 없습니다.");
-            
-            let plainApiKey: string | undefined;
-            if (lastScore.apiKey && (lastScore.aiModel === 'perplexity' || lastScore.aiModel === 'chatgpt')) {
-                if (!session?.access_token) {
-                    throw new Error("API 키를 복호화하기 위한 인증 토큰을 찾을 수 없습니다.");
-                }
-                plainApiKey = await decrypt(lastScore.apiKey, session.access_token);
-            }
-
-            let nextTopic: string;
-            if (lastScore.aiModel === 'perplexity' && plainApiKey) {
-                nextTopic = await getNextPerplexityStudyTopic(lastScore.topic, plainApiKey);
-            } else if (lastScore.aiModel === 'chatgpt' && plainApiKey) {
-                nextTopic = await getNextChatGptStudyTopic(lastScore.topic, plainApiKey);
-            } else {
-                nextTopic = await getNextGeminiStudyTopic(lastScore.topic);
-            }
-            
-            const newSession: LearningSessionState = {
-                topic: nextTopic,
-                currentStep: LearningStep.ANALYSIS,
-                messages: [],
-                aiModel: lastScore.aiModel,
-                apiKey: lastScore.apiKey, // Keep the encrypted key for the new session
-                bibleVerse: null,
-                score: 0,
-                quizData: null,
-                currentQuestionIndex: 0
-            };
-            
-            setActiveSession(newSession);
-            setStatus('learning');
-        } catch (e) {
-            setError(e instanceof Error ? e.message : '다음 학습 세션을 시작하는 데 실패했습니다.');
-            setStatus('error');
-        }
-    }, [lastScore, session]);
-
     const handleStateChange = useCallback(async (newState: LearningSessionState) => {
         setActiveSession(newState);
         if (profile?.id) {
-// FIX: The `saveActiveSession` function now gets the user ID from the session internally and only accepts the session data object.
             await saveActiveSession(newState);
         }
     }, [profile?.id]);
@@ -925,7 +1010,7 @@ const App: React.FC = () => {
     const handleRestart = useCallback(() => {
         setStatus('idle');
         setActiveSession(null);
-        setLastScore({ score: 0, total: 0, topic: '', aiModel: 'gemini', apiKey: undefined });
+        setLastSessionResult({ score: 0, total: 0, topic: '', exitType: 'quiz' });
     }, []);
     
     const handleResume = useCallback(() => {
@@ -933,10 +1018,6 @@ const App: React.FC = () => {
     }, []);
     
     const handleDiscard = useCallback(() => {
-        // The user wants to go back to the main menu. We don't clear the local activeSession.
-        // If they click the same book again, `handleStartLearning` will find the
-        // activeSession and resume it. If they pick a different book, a new session
-        // will be created, overwriting the old one in the database.
         setStatus('idle');
     }, []);
 
@@ -969,17 +1050,18 @@ const App: React.FC = () => {
                             userProgress={profile?.progress ?? null}
                             onLogout={handleLogout}
                             onDelete={handleDeleteUser}
+                            onTestUpdate={testUpdateProgress}
                         />
                     </div>
                 );
             case 'session-prompt':
-                if (!activeSession) { // Should not happen, but as a fallback
+                if (!activeSession) {
                     setStatus('idle');
                     return null;
                 }
                 return <ResumeSessionPrompt session={activeSession} onResume={handleResume} onDiscard={handleDiscard} />;
             case 'learning':
-                if (!activeSession) { // Should not happen
+                if (!activeSession) {
                      setStatus('idle');
                      return null;
                 }
@@ -988,14 +1070,14 @@ const App: React.FC = () => {
                     onStateChange={handleStateChange}
                     onFinish={handleFinishLearning}
                     onBack={handleBackToMain}
+                    onSaveAndExit={handleSaveAndExit}
                 />;
             case 'finished':
                 return <ResultsScreen 
-                    score={lastScore.score} 
-                    total={lastScore.total} 
-                    topic={lastScore.topic}
+                    lastResult={lastSessionResult}
                     onRestart={handleRestart}
-                    onContinue={handleContinueLearning}
+                    onContinue={handleStartLearning}
+                    progressDebugInfo={progressDebugInfo}
                 />;
             case 'error':
                 return (
@@ -1008,6 +1090,7 @@ const App: React.FC = () => {
                         >
                             메인 화면으로 돌아가기
                         </button>
+                        <ProgressDebugPanel debugInfo={progressDebugInfo} />
                     </div>
                 );
         }

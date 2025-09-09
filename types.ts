@@ -45,10 +45,11 @@ export interface LearningSessionState {
   score: number;
   quizData: Quiz | null;
   currentQuestionIndex: number;
+  isComplete?: boolean;
 }
 
 export interface UserProgress {
-    [book: string]: string[];
+    [book: string]: LearningSessionState;
 }
 
 export interface Profile {
