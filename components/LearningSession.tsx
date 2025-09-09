@@ -22,6 +22,7 @@ interface ProcessedResponse {
   stepChangedTo?: LearningStep;
   quizStarted?: Quiz;
   verseExtracted?: string;
+  isComplete?: boolean;
 }
 
 // ---------------- UI 보조 컴포넌트 ----------------
@@ -219,6 +220,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(savedSession.currentQuestionIndex);
   const [score, setScore] = useState(savedSession.score);
+  const [isCompleted, setIsCompleted] = useState(false);
   
   // 모바일 UI 상태
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
@@ -272,6 +274,12 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         setError("퀴즈 데이터를 처리하는 중 오류가 발생했습니다.");
       }
     }
+    
+    const completeMatch = cleanedText.match(/\[COMPLETE\]/);
+    if (completeMatch) {
+      result.isComplete = true;
+      cleanedText = cleanedText.replace(completeMatch[0], '').trim();
+    }
 
     result.cleanedText = cleanedText;
     return result;
@@ -317,6 +325,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   
       if (processed.verseExtracted) setBibleVerse(processed.verseExtracted);
       if (processed.quizStarted) setQuizData(processed.quizStarted);
+      if (processed.isComplete) setIsCompleted(true);
   
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 오류');
@@ -449,12 +458,17 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     if (quizData && currentQuestionIndex < quizData.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
     } else {
-      onFinish(score, quizData?.questions.length || 0);
+      const finalScore = score;
+      const totalQuestions = quizData?.questions.length || 0;
+      const systemMessage = `[SYSTEM] Test finished. Score: ${finalScore}/${totalQuestions}. Please provide the final completion message.`;
+      
+      setQuizData(null); // Return to chat view
+      sendMessage(systemMessage);
     }
   };
 
   const handleQuizSkip = () => {
-    onFinish(-1, quizData?.questions.length || 0);
+    onSaveAndExit();
   };
 
   const StepSelectionModal: React.FC = () => {
@@ -625,25 +639,37 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
               </div>
             )}
           </div>
-          <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
-            <form onSubmit={handleFormSubmit} className="flex items-center gap-3">
-              <input
-                type="text"
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                placeholder="메시지를 입력하세요..."
-                disabled={isLoading}
-                className="flex-1 w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-              />
-              <button
-                type="submit"
-                disabled={isLoading || !userInput.trim()}
-                className="px-5 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
-              >
-                전송
-              </button>
-            </form>
-          </div>
+
+          {isCompleted ? (
+            <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
+                <button
+                    onClick={() => onFinish(score, quizData?.questions.length || 5)}
+                    className="w-full px-5 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-500 transition-colors text-lg"
+                >
+                    학습 완료
+                </button>
+            </div>
+          ) : (
+            <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
+                <form onSubmit={handleFormSubmit} className="flex items-center gap-3">
+                <input
+                    type="text"
+                    value={userInput}
+                    onChange={(e) => setUserInput(e.target.value)}
+                    placeholder="메시지를 입력하세요..."
+                    disabled={isLoading}
+                    className="flex-1 w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                />
+                <button
+                    type="submit"
+                    disabled={isLoading || !userInput.trim()}
+                    className="px-5 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
+                >
+                    전송
+                </button>
+                </form>
+            </div>
+          )}
         </div>
       </div>
     )}

@@ -136,6 +136,7 @@ export const getSystemInstruction = (topic: string) => {
 - **중요:** 사용자가 한 단계를 완전히 숙달했다고 확신할 때만 다음 단계로 넘어갑니다.
 - **단계 전환을 애플리케이션에 알리기 위해, 당신의 응답에 반드시 마커를 포함해야 합니다. 형식은 \\\`[NEXT_STEP:STEP_NAME_IN_ENGLISH]\\\` 입니다. 예: \\\`[NEXT_STEP:UNDERSTANDING]\\\` 또는 \\\`[NEXT_STEP:MEMORIZATION]\\\`.**
 - 마지막 '시험' 단계가 되면, 먼저 시험을 시작한다고 말한 다음, 반드시 \\\`[START_TEST]\\\` 마커와 함께 퀴즈용 JSON 객체를 즉시 출력해야 합니다.
+- **학습 완료:** 사용자가 퀴즈를 완료하면, 시스템이 \`[SYSTEM] Test finished. Score: X/Y.\` 와 같은 메시지를 보낼 것입니다. 이 메시지를 받으면, "수고하셨습니다. 모든 학습 단계를 완료했습니다." 와 같은 최종 축하 메시지를 보내고, 그 다음 줄에 반드시 \`[COMPLETE]\` 태그를 포함해야 합니다. 더 이상 질문하지 마세요.
 - JSON 객체는 다음 스키마를 정확히 따라야 합니다: { "topic": "string", "questions": [ { "type": "FILL_IN_THE_BLANK", "verseReference": "string", "verseTextParts": ["string", "___", "string", "___", "string"], "answers": ["string", "string"] }, ... (총 5문제) ] }
 - **빈칸 채우기(FILL_IN_THE_BLANK) 문제의 경우, 구절의 암송에 도움이 되도록 맥락상 중요한 핵심 단어 **두 개**를 빈칸으로 만드세요. 따라서 \\\`verseTextParts\\\` 배열에는 '___'가 두 개 있어야 하고, \\\`answers\\\` 배열에는 해당 빈칸에 대한 정답 두 개가 순서대로 포함되어야 합니다.**
 - 텍스트 응답에 마크다운을 사용하지 마세요.

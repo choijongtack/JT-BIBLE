@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import type { LearningSessionState, UserProgress, Profile } from '../types';
+import type { LearningSessionState, UserProgress, Profile, BookProgress } from '../types';
 import { LearningStep } from '../constants';
 
 const API_TIMEOUT = 10000;
@@ -107,10 +107,9 @@ export const createProfile = async (email?: string): Promise<Profile> => {
 
 // ---------------- 학습 진행도 & 세션 ----------------
 
-// ✅ 진행도 업데이트 + 세션 동시 저장
 export const updateUserProgress = async (
   book: string,
-  sessionState: LearningSessionState
+  bookProgress: BookProgress
 ): Promise<ProgressDebugInfo> => {
   const debugInfo: ProgressDebugInfo = { before: null, request: null, after: null, error: null };
 
@@ -126,8 +125,8 @@ export const updateUserProgress = async (
     debugInfo.before = currentProfile?.progress || {};
     const newProgress = JSON.parse(JSON.stringify(currentProfile?.progress || {}));
 
-    // progress에는 책별로 마지막 학습 세션 상태를 저장합니다.
-    newProgress[book] = sessionState;
+    // progress에는 책별로 마지막 학습 세션 상태와 완료된 토픽 목록을 저장합니다.
+    newProgress[book] = bookProgress;
 
     debugInfo.request = newProgress;
 
@@ -135,7 +134,6 @@ export const updateUserProgress = async (
       .from("profiles")
       .update({
         progress: newProgress,
-        // active_learning_session: sessionState, // 🚀 저장 및 종료 시에는 active_session을 null로 설정해야 합니다. 이 로직은 App.tsx에서 처리됩니다.
         updated_at: new Date().toISOString(),
       })
       .eq("id", userId)
@@ -184,10 +182,15 @@ export const testUpdateProgress = async () => {
         currentQuestionIndex: 0,
         isComplete: true,
     };
+    
+    const testBookProgress: BookProgress = {
+      lastSession: testSession,
+      completedTopics: [`${testBook} 1:1-5`]
+    };
 
     alert("Sending test update. Check your browser's developer console (F12) for detailed debug info.");
     
-    const result = await updateUserProgress(testBook, testSession);
+    const result = await updateUserProgress(testBook, testBookProgress);
     
     console.log("--- Progress Update Test Result ---", result);
 

@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import type { AppStatus, LearningSessionState, AiModel, Profile } from './types';
+import type { AppStatus, LearningSessionState, AiModel, Profile, BookProgress } from './types';
 import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX, LearningStep } from './constants';
 import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
@@ -9,7 +9,7 @@ import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNe
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic, testPerplexityApiKey } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic, testChatGptApiKey } from './services/chatgptService';
 import { loginUser, registerUser, getProfile, updateUserProgress, saveActiveSession, logoutUser, createProfile, deleteUserAccount, testUpdateProgress } from './services/userDataService';
-import { getStudiedBookCountForList } from './services/bibleData';
+import { getStudiedBookCountForList, calculateVerseProgressForList } from './services/bibleData';
 import { supabase } from './services/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
 import { encrypt, decrypt } from './services/encryptionService';
@@ -160,7 +160,13 @@ const WelcomeScreen: React.FC<{
 
     const BookButton: React.FC<{ book: string }> = ({ book }) => {
         const isSelected = selectedBook === book;
-        const isStudied = !!userProgress?.[book];
+        const bookProgress = userProgress?.[book];
+
+        // State 1: A session was saved but not completed.
+        const isInProgress = bookProgress?.lastSession && !bookProgress.lastSession.isComplete;
+        
+        // State 2: At least one topic has been fully completed.
+        const hasCompletedTopics = bookProgress && bookProgress.completedTopics.length > 0;
 
         return (
             <button
@@ -168,12 +174,26 @@ const WelcomeScreen: React.FC<{
                 className={`relative w-full text-center px-2 py-2 rounded-md transition-colors text-sm group ${
                     isSelected
                         ? 'bg-blue-600 text-white font-bold'
-                        : isStudied 
+                        : isInProgress
+                        ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 ring-1 ring-yellow-500/50'
+                        : hasCompletedTopics 
                         ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 ring-1 ring-blue-500/50'
                         : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
                 }`}
             >
-                {isStudied && <IconCheck className="absolute top-1 right-1 w-3.5 h-3.5 text-blue-400" />}
+                {/* Show in-progress indicator with higher priority */}
+                {isInProgress && (
+                    <div 
+                        className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-yellow-400 rounded-full animate-pulse"
+                        title="학습 진행 중"
+                    ></div>
+                )}
+
+                {/* Show completed indicator only if not in progress */}
+                {!isInProgress && hasCompletedTopics && (
+                    <IconCheck className="absolute top-1 right-1 w-3.5 h-3.5 text-blue-400" title="완료한 학습 있음" />
+                )}
+                
                 <span className="relative z-10">{book}</span>
             </button>
         );
@@ -198,7 +218,7 @@ const WelcomeScreen: React.FC<{
             <div>
                 <div className="flex justify-between items-center text-sm mb-1 text-slate-300">
                     <span>{label}</span>
-                    <span>{Math.round(progress)}%</span>
+                    <span>{progress.toFixed(2)}%</span>
                 </div>
                 <div className="w-full bg-slate-700 rounded-full h-2.5">
                     <div 
@@ -213,10 +233,11 @@ const WelcomeScreen: React.FC<{
         );
     };
 
-    const totalStudiedCount = getStudiedBookCountForList(userProgress, [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
-    const otStudiedCount = getStudiedBookCountForList(userProgress, OLD_TESTAMENT_BOOKS);
-    const ntStudiedCount = getStudiedBookCountForList(userProgress, NEW_TESTAMENT_BOOKS);
+    const totalProgress = calculateVerseProgressForList(userProgress, [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
+    const otProgress = calculateVerseProgressForList(userProgress, OLD_TESTAMENT_BOOKS);
+    const ntProgress = calculateVerseProgressForList(userProgress, NEW_TESTAMENT_BOOKS);
 
+    const bookLastTopic = userProgress?.[selectedBook || '']?.lastSession?.topic;
 
     return (
         <div className="w-full max-w-4xl mx-auto bg-slate-800/50 p-4 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
@@ -253,25 +274,25 @@ const WelcomeScreen: React.FC<{
             <p className="text-slate-400 text-center mb-8">공부하고 싶은 성경을 선택하고 학습을 시작하세요.</p>
             
             <div className="mb-8 px-4 sm:px-0">
-                <h3 className="text-xl font-semibold text-slate-200 mb-4 text-center">전체 학습 진행률 (학습한 책 기준)</h3>
+                <h3 className="text-xl font-semibold text-slate-200 mb-4 text-center">전체 학습 진행률 (완료한 구절 기준)</h3>
                 <div className="bg-slate-900/50 p-4 rounded-lg grid grid-cols-1 sm:grid-cols-3 gap-6">
                     <StatProgressBar 
                         label="성경 전체" 
-                        studied={totalStudiedCount}
-                        total={66}
-                        unit="권"
+                        studied={totalProgress.completed}
+                        total={totalProgress.total}
+                        unit="절"
                     />
                     <StatProgressBar 
                         label="구약" 
-                        studied={otStudiedCount}
-                        total={39}
-                        unit="권"
+                        studied={otProgress.completed}
+                        total={otProgress.total}
+                        unit="절"
                     />
                     <StatProgressBar 
                         label="신약" 
-                        studied={ntStudiedCount}
-                        total={27}
-                        unit="권"
+                        studied={ntProgress.completed}
+                        total={ntProgress.total}
+                        unit="절"
                     />
                 </div>
             </div>
@@ -381,11 +402,10 @@ const WelcomeScreen: React.FC<{
                          {selectedBook && (
                             <div className="w-full max-w-sm mx-auto bg-slate-900/50 p-3 rounded-lg animate-fade-in">
                                 <p className="text-sm text-slate-300 font-semibold mb-1">{selectedBook}</p>
-                                {/* FIX: Safely access and split the topic to prevent crashes on corrupt data. */}
-                                {userProgress?.[selectedBook] && typeof userProgress[selectedBook].topic === 'string' && userProgress[selectedBook].topic ? (
+                                {bookLastTopic && typeof bookLastTopic === 'string' ? (
                                     <div>
                                         <span className="text-xs text-slate-400">최근 학습: </span>
-                                        <span className="font-mono text-blue-300 text-sm">{userProgress[selectedBook].topic.split(' ')[1] || ''}</span>
+                                        <span className="font-mono text-blue-300 text-sm">{bookLastTopic.split(' ')[1] || ''}</span>
                                     </div>
                                 ) : (
                                     <p className="text-slate-400 text-sm">아직 학습 기록이 없습니다.</p>
@@ -461,7 +481,6 @@ const ResultsScreen: React.FC<{
     } | null;
 }> = ({ lastResult, onRestart, onContinue, progressDebugInfo }) => {
     const { score, total, topic, exitType } = lastResult;
-    // FIX: Safely derive bookName to prevent crash if topic is undefined or not a string.
     const bookName = (topic && typeof topic === 'string' ? topic.split(' ')[0] : null) || '성경';
     const isSkipped = score < 0 && exitType === 'quiz';
     const isSaveAndExit = exitType === 'save';
@@ -697,14 +716,12 @@ const App: React.FC = () => {
                 setSession(null);
                 setProfile(null);
                 setActiveSession(null);
-                // Only switch to login if not in a pending confirmation state
                 if (statusRef.current !== 'awaiting-confirmation' && statusRef.current !== 'profile_error') {
                     setStatus('login');
                 }
                 return;
             }
             
-            // Avoid re-loading if we are intentionally showing a profile error.
             if (statusRef.current === 'profile_error') return;
 
             if (statusRef.current !== 'loading') {
@@ -714,12 +731,10 @@ const App: React.FC = () => {
             setLoadingMessage('세션 확인됨. 프로필 조회 시도 중...');
             setAuthError(null);
             try {
-// FIX: The `getProfile` function now gets the user from the session internally and does not accept arguments.
                 let userProfile = await getProfile();
                 
                 if (!userProfile) {
                     setLoadingMessage('기존 프로필 없음. 신규 프로필 생성 시도 중...');
-// FIX: The `createProfile` function now only accepts an optional email argument. The user ID is retrieved from the session internally.
                     userProfile = await createProfile(session.user.email);
                     if (userProfile) {
                         setLoadingMessage('신규 프로필 생성 성공.');
@@ -736,7 +751,6 @@ const App: React.FC = () => {
                 setSession(session);
                 setProfile(userProfile);
                 
-                // A more robust check to ensure the session object is valid and has a topic.
                 if (
                     userProfile.active_learning_session &&
                     typeof userProfile.active_learning_session === 'object' &&
@@ -750,10 +764,8 @@ const App: React.FC = () => {
                 } else {
                     setLoadingMessage('준비 완료. 환영 화면으로 이동합니다.');
                     setActiveSession(null);
-                    // Proactively clear invalid/empty session data from the database.
                     if (userProfile.id && userProfile.active_learning_session) {
                         console.warn("Clearing invalid active session data from profile:", userProfile.active_learning_session);
-// FIX: The `saveActiveSession` function now gets the user ID from the session internally and only accepts the session data object.
                         await saveActiveSession(null);
                     }
                     setStatus('idle');
@@ -762,9 +774,6 @@ const App: React.FC = () => {
                 const errorMessage = e instanceof Error ? e.message : "프로필을 로드하는 동안 알 수 없는 오류가 발생했습니다.";
                 console.error("Profile loading/creation failed:", errorMessage);
                 
-                // UNIFIED BEHAVIOR: Always show the profile error screen on failure.
-                // This prevents a jarring logout loop if the profile fetch times out due to RLS issues.
-                // The ProfileErrorScreen component is already equipped to display RLS instructions for timeout errors.
                 setError(errorMessage);
                 setStatus('profile_error');
             }
@@ -779,7 +788,6 @@ const App: React.FC = () => {
         try {
             setAuthError(null);
             await loginUser(email, password);
-            // onAuthStateChange will handle the rest
         } catch (e) {
             setAuthError(e instanceof Error ? e.message : '로그인 실패');
             throw e;
@@ -816,7 +824,7 @@ const App: React.FC = () => {
         setLoadingMessage('계정을 삭제하는 중입니다...');
         try {
             await deleteUserAccount();
-            await handleLogout(); // Reuse logout logic to clear state
+            await handleLogout();
         } catch (e) {
             setError(e instanceof Error ? e.message : '계정 삭제에 실패했습니다.');
             setStatus('error');
@@ -828,20 +836,17 @@ const App: React.FC = () => {
         setIsDeleteConfirmOpen(true);
     }, [profile]);
     
-    // FIX: Made the `aiModel` parameter optional to align with the `onContinue` prop type in `ResultsScreen`,
-    // which only passes the book name. The internal logic already correctly uses the saved session's AI model
-    // when continuing a book.
     const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, apiKey?: string) => {
         setStatus('loading');
         setError(null);
 
         try {
-            let savedSession = profile?.progress?.[book];
+            const savedBookProgress = profile?.progress?.[book];
+            let savedSession = savedBookProgress?.lastSession;
 
-            // FIX: Defensively check for a valid topic in the saved session to prevent crashes.
             if (savedSession && (typeof savedSession.topic !== 'string' || !savedSession.topic)) {
                 console.warn(`Saved session for "${book}" is missing a valid topic. A new session will be started.`, savedSession);
-                savedSession = undefined; // Treat as if no session was saved.
+                savedSession = undefined;
             }
 
             let sessionToStart: LearningSessionState;
@@ -901,7 +906,6 @@ const App: React.FC = () => {
                     topic: firstTopic,
                     currentStep: LearningStep.ANALYSIS,
                     messages: [],
-                    // FIX: Default to 'gemini' if aiModel is not provided, ensuring type safety for `LearningSessionState`.
                     aiModel: aiModel || 'gemini',
                     apiKey: encryptedApiKey,
                     bibleVerse: null,
@@ -921,7 +925,6 @@ const App: React.FC = () => {
     }, [profile, session]);
 
     const handleFinishLearning = useCallback(async (score: number, total: number) => {
-        // FIX: Add a robust guard to ensure activeSession and its topic are valid before proceeding.
         if (!activeSession || !profile || typeof activeSession.topic !== 'string' || !activeSession.topic) {
             console.error("handleFinishLearning called with invalid activeSession or missing topic.", activeSession);
             setError("학습 세션을 완료할 수 없습니다: 유효하지 않은 세션 데이터입니다.");
@@ -934,8 +937,31 @@ const App: React.FC = () => {
         const match = activeSession.topic.match(/^[가-힣]+/);
         const book = match ? match[0] : activeSession.topic;
         
-        const sessionToSave = { ...activeSession, isComplete: true };
-        const result = await updateUserProgress(book, sessionToSave);
+        const currentBookProgress = profile.progress?.[book] || {
+            lastSession: activeSession,
+            completedTopics: []
+        };
+
+        const completedTopicsSet = new Set(currentBookProgress.completedTopics);
+        completedTopicsSet.add(activeSession.topic);
+
+        const sessionToSave: LearningSessionState = { 
+            ...activeSession, 
+            isComplete: true,
+            messages: [], 
+            currentStep: LearningStep.ANALYSIS,
+            bibleVerse: null,
+            quizData: null,
+            currentQuestionIndex: 0,
+            score: 0
+        };
+
+        const newBookProgress: BookProgress = {
+            lastSession: sessionToSave,
+            completedTopics: Array.from(completedTopicsSet)
+        };
+
+        const result = await updateUserProgress(book, newBookProgress);
         setProgressDebugInfo(result);
 
         if (result.error || !result.after) {
@@ -956,10 +982,8 @@ const App: React.FC = () => {
     }, [activeSession, profile]);
     
     const handleSaveAndExit = useCallback(async () => {
-        // FIX: Add a robust guard to ensure activeSession and its topic are valid, failing gracefully if not.
         if (!activeSession || !profile || typeof activeSession.topic !== 'string' || !activeSession.topic) {
             console.error("handleSaveAndExit called with invalid activeSession or missing topic.", activeSession);
-            // Fail gracefully by returning to the main menu without saving.
             setStatus('idle');
             setActiveSession(null);
             if (profile?.id) {
@@ -972,9 +996,20 @@ const App: React.FC = () => {
 
         const match = activeSession.topic.match(/^[가-힣]+/);
         const book = match ? match[0] : activeSession.topic;
+        
+        const currentBookProgress = profile.progress?.[book] || {
+            lastSession: activeSession,
+            completedTopics: []
+        };
 
         const sessionToSave = { ...activeSession, isComplete: false };
-        const result = await updateUserProgress(book, sessionToSave);
+        
+        const newBookProgress: BookProgress = {
+            ...currentBookProgress,
+            lastSession: sessionToSave
+        };
+
+        const result = await updateUserProgress(book, newBookProgress);
         setProgressDebugInfo(result);
 
         if (result.error || !result.after) {

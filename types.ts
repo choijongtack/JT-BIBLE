@@ -48,8 +48,14 @@ export interface LearningSessionState {
   isComplete?: boolean;
 }
 
+// 각 책의 진행 상황을 더 자세히 추적하기 위한 새 인터페이스
+export interface BookProgress {
+  lastSession: LearningSessionState;
+  completedTopics: string[];
+}
+
 export interface UserProgress {
-    [book: string]: LearningSessionState;
+    [book: string]: BookProgress;
 }
 
 export interface Profile {
