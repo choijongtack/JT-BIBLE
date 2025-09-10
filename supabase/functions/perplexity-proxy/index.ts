@@ -24,7 +24,8 @@ serve(async (req) => {
   }
 
   try {
-    const { apiKey, endpoint, payload } = await req.json();
+    const { payload: functionArgs } = await req.json();
+    const { apiKey, endpoint, payload } = functionArgs;
 
     if (!apiKey) throw new Error('Perplexity API key is required.');
     if (!endpoint) throw new Error('Perplexity API endpoint is required.');

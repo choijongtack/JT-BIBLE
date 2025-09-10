@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = "https://aoefflmxefybzpcazizg.supabase.co";
+export const supabaseUrl = "https://aoefflmxefybzpcazizg.supabase.co";
 const supabaseAnonKey = "sb_publishable_nMCjQ2hR_07BFeDOrONL2A_J041oGJa";
 
 // ✅ 탭/창 독립 세션 저장소

@@ -1,103 +1,137 @@
 import type { ChatMessage } from '../types';
-import { supabase } from './supabaseClient';
+import { supabase, supabaseUrl } from './supabaseClient';
 
 const GPT_MODEL = 'gpt-4o';
-const PROXY_FUNCTION_NAME = 'chatgpt-proxy';
-const API_ENDPOINT = 'chat/completions';
+// 함수 URL은 내보낸 supabaseUrl을 사용하여 동적으로 구성됩니다.
+const PROXY_URL = `${supabaseUrl}/functions/v1/chatgpt-proxy`;
 
-
-const handleProxyError = (functionError: Error | null, data: any, context: string): { error: string } => {
-    let errorMessage: string;
-    if (functionError) {
-        errorMessage = functionError.message;
-    } else if (data?.error?.message) {
-        errorMessage = data.error.message;
-    } else {
-        errorMessage = `알 수 없는 오류가 발생했습니다: ${JSON.stringify(data)}`;
-    }
-    console.error(`ChatGPT proxy call failed (${context}):`, errorMessage);
-    return { error: errorMessage };
+/**
+ * Gets the authorization headers required for calling the Supabase function.
+ * @returns A promise that resolves to the HeadersInit object.
+ */
+const getAuthHeaders = async (): Promise<HeadersInit> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('User not authenticated.');
+    return {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json'
+    };
 };
 
-
-export const testChatGptApiKey = async (apiKey: string): Promise<{ isValid: boolean; error?: string }> => {
-    if (!apiKey) return { isValid: false, error: 'API 키가 제공되지 않았습니다.' };
+/**
+ * A generic helper function to call the ChatGPT completion proxy.
+ * It sends the full payload required by the OpenAI API.
+ * The backend proxy is expected to forward this payload.
+ * @param payload The request body to be sent to the OpenAI API.
+ * @returns The JSON response from the API.
+ */
+const callChatGptCompletion = async (payload: object): Promise<any> => {
+    let response: Response;
     try {
-        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: {
-                    model: GPT_MODEL,
-                    messages: [{ role: 'user', content: 'Hello' }],
-                    max_tokens: 5,
-                }
-            }
+        const headers = await getAuthHeaders();
+        response = await fetch(`${PROXY_URL}/chatgpt-completion`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
         });
-
-        if (functionError || data.error) {
-             return { isValid: false, ...handleProxyError(functionError, data, 'API key test') };
+    } catch (e) {
+        if (e instanceof TypeError && e.message.includes('Failed to fetch')) {
+            throw new Error('네트워크 오류: ChatGPT 서비스에 연결할 수 없습니다. 인터넷 연결 상태를 확인하거나, 잠시 후 다시 시도해 주세요.');
         }
+        throw e;
+    }
 
-        return { isValid: true };
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : '알 수 없는 네트워크 오류';
-        console.error('OpenAI API key test failed due to a network or other error:', error);
-        return { isValid: false, error: errorMessage };
+    let data;
+    try {
+        data = await response.json();
+    } catch {
+        const errorText = await response.text();
+        throw new Error(`ChatGPT 프록시 오류: ${response.status} ${response.statusText}. 세부 정보: ${errorText.substring(0, 200)}`);
+    }
+
+    if (!response.ok || data.error) {
+        const originalMessage = data.error?.message || 'ChatGPT 프록시에서 응답을 가져오는 데 실패했습니다.';
+        
+        if (originalMessage.toLowerCase().includes('quota')) {
+            throw new Error(`OpenAI 사용량 한도를 초과했습니다. OpenAI 대시보드의 '결제(Billing)' 섹션에서 플랜 및 결제 세부 정보를 확인해주세요. 이 오류는 일반적으로 무료 크레딧을 모두 사용했거나 설정된 사용 한도에 도달했을 때 발생합니다.`);
+        }
+        
+        if (originalMessage.toLowerCase().includes('incorrect api key') || originalMessage.toLowerCase().includes('invalid authentication')) {
+            throw new Error(`저장된 OpenAI API 키가 잘못되었습니다. 메인 화면으로 돌아가 '수정' 버튼을 눌러 올바른 API 키를 다시 저장해주세요.`);
+        }
+        
+        throw new Error(originalMessage);
+    }
+    return data;
+};
+
+/**
+ * Saves the user's ChatGPT API key by sending it to a secure Supabase Edge Function.
+ * The function is responsible for encrypting the key before storing it.
+ * @param apiKey The user's plaintext ChatGPT API key.
+ */
+export const saveChatGptApiKey = async (apiKey: string): Promise<void> => {
+    if (!apiKey || typeof apiKey !== 'string') {
+        throw new Error('유효한 API 키를 입력해야 합니다.');
+    }
+    
+    let response: Response;
+    try {
+        const headers = await getAuthHeaders();
+        response = await fetch(`${PROXY_URL}/save-chatgpt-key`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ apiKey: apiKey.trim() })
+        });
+    } catch (e) {
+        if (e instanceof TypeError && e.message.includes('Failed to fetch')) {
+            throw new Error('네트워크 오류: API 키 저장 서버에 연결할 수 없습니다. 인터넷 연결 상태를 확인하거나, 잠시 후 다시 시도해 주세요.');
+        }
+        throw e;
+    }
+
+    if (!response.ok) {
+        let errorData;
+        try {
+            errorData = await response.json();
+        } catch {
+            const errorText = await response.text();
+            throw new Error(`API 키 저장에 실패했습니다. 서버 응답: ${response.status} ${response.statusText}. 세부 정보: ${errorText.substring(0, 100)}`);
+        }
+        throw new Error(errorData.error?.message || 'API 키를 저장하는 데 실패했습니다.');
     }
 };
 
-export const getStudyTopicForBook = async (book: string, apiKey: string): Promise<string> => {
+
+export const getStudyTopicForBook = async (book: string): Promise<string> => {
     const prompt = `당신은 전문 신학자이고 법률학자이며 로스쿨 교수입니다. 저는 '${book}'을(를) 공부하기 시작하려고 합니다. 이 책의 시작 부분(1장 1절부터)을 분석하여, 첫 학습 세션에 적합한, 내용상 자연스럽게 구분되는 첫 번째 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 예를 들어, '에베소서'를 선택했다면 '에베소서 1:1-2' 또는 '에베소서 1:1-14'와 같이 제안할 수 있습니다. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
     
     try {
-        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: {
-                    model: GPT_MODEL,
-                    messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
-                }
-            }
+        const data = await callChatGptCompletion({
+            model: GPT_MODEL,
+            messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
         });
-
-        if (functionError || data.error) {
-            const { error } = handleProxyError(functionError, data, 'get study topic');
-            throw new Error(error);
-        }
-
         const topic = data.choices[0].message.content.trim();
         if (!topic || !topic.includes(':')) {
             throw new Error('AI가 유효한 주제를 반환하지 않았습니다.');
         }
         return topic;
+
     } catch (error) {
-        console.error(`Error getting study topic for ${book} from OpenAI:`, error);
+        console.error(`Error getting study topic for ${book} from ChatGPT:`, error);
         const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
         throw new Error(`학습 주제를 가져오지 못했습니다: ${errorMessage}`);
     }
 };
 
-export const getNextStudyTopic = async (currentTopic: string, apiKey: string): Promise<string> => {
+export const getNextStudyTopic = async (currentTopic: string): Promise<string> => {
     const prompt = `현재 학습 주제는 '${currentTopic}'입니다. 이 구절 바로 다음에 이어지는, 내용상 자연스럽게 구분되는 다음 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
 
     try {
-         const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: {
-                    model: GPT_MODEL,
-                    messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
-                }
-            }
+        const data = await callChatGptCompletion({
+             model: GPT_MODEL,
+             messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
         });
-        
-        if (functionError || data.error) {
-            const { error } = handleProxyError(functionError, data, 'get next study topic');
-            throw new Error(error);
-        }
 
         const topic = data.choices[0].message.content.trim();
         if (!topic || !topic.includes(':')) {
@@ -105,7 +139,7 @@ export const getNextStudyTopic = async (currentTopic: string, apiKey: string): P
         }
         return topic;
     } catch (error) {
-        console.error(`Error getting next study topic after ${currentTopic} from OpenAI:`, error);
+        console.error(`Error getting next study topic after ${currentTopic} from ChatGPT:`, error);
         const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
         throw new Error(`다음 학습 주제를 가져오지 못했습니다: ${errorMessage}`);
     }
@@ -151,7 +185,7 @@ const buildHistory = (systemInstruction: string, existingMessages: ChatMessage[]
     return history;
 }
 
-export const startLearningConversation = async (topic: string, apiKey: string, history: ChatMessage[] = []): Promise<{ history: ChatMessage[]; initialMessage?: string }> => {
+export const startLearningConversation = async (topic: string, history: ChatMessage[] = []): Promise<{ history: ChatMessage[]; initialMessage?: string }> => {
     try {
         if (history.length > 0) {
             return { history };
@@ -161,18 +195,7 @@ export const startLearningConversation = async (topic: string, apiKey: string, h
         const messages = buildHistory(systemInstruction, []);
         messages.push({ role: 'user', content: '학습을 시작해주세요.' });
 
-        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: { model: GPT_MODEL, messages }
-            }
-        });
-
-        if (functionError || data.error) {
-            const { error } = handleProxyError(functionError, data, 'start conversation');
-            throw new Error(error);
-        }
+        const data = await callChatGptCompletion({ model: GPT_MODEL, messages });
         
         const initialMessage = data.choices[0].message.content;
         
@@ -183,35 +206,24 @@ export const startLearningConversation = async (topic: string, apiKey: string, h
 
         return { history: newHistory, initialMessage };
     } catch (error) {
-        console.error("Error starting conversation with OpenAI:", error);
+        console.error("Error starting conversation with ChatGPT:", error);
         const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
         throw new Error(`대화를 시작하지 못했습니다: ${errorMessage}`);
     }
 };
 
-export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string, apiKey: string): Promise<string> => {
+export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string): Promise<string> => {
     try {
-        const systemInstruction = getSystemInstruction(''); // Topic is baked into history.
+        const systemInstruction = getSystemInstruction(''); // Topic is baked into history, so not critical here.
         const messages = buildHistory(systemInstruction, currentHistory);
         messages.push({ role: 'user', content: message });
         
-        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: { model: GPT_MODEL, messages }
-            }
-        });
-
-        if (functionError || data.error) {
-            const { error } = handleProxyError(functionError, data, 'continue conversation');
-            throw new Error(error);
-        }
+        const data = await callChatGptCompletion({ model: GPT_MODEL, messages });
 
         return data.choices[0].message.content;
 
     } catch (error) {
-        console.error("Error continuing conversation with OpenAI:", error);
+        console.error("Error continuing conversation with ChatGPT:", error);
         const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
         throw new Error(`대화를 이어가지 못했습니다: ${errorMessage}`);
     }

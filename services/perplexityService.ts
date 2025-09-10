@@ -37,16 +37,17 @@ const handleProxyError = (functionError: Error | null, data: any, context: strin
 export const testPerplexityApiKey = async (apiKey: string): Promise<{ isValid: boolean; error?: string }> => {
     if (!apiKey) return { isValid: false, error: 'API 키가 제공되지 않았습니다.' };
     try {
-        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: {
-                    model: PPLX_MODEL,
-                    messages: [{ role: 'user', content: 'Hello' }],
-                    max_tokens: 5,
-                }
+        const payload = {
+            apiKey,
+            endpoint: API_ENDPOINT,
+            payload: {
+                model: PPLX_MODEL,
+                messages: [{ role: 'user', content: 'Hello' }],
+                max_tokens: 5,
             }
+        };
+        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
+            body: { payload }
         });
 
         if (functionError || data.error || data.detail) {
@@ -65,15 +66,16 @@ export const getStudyTopicForBook = async (book: string, apiKey: string): Promis
     const prompt = `당신은 전문 신학자이고 법률학자이며 로스쿨 교수입니다. 저는 '${book}'을(를) 공부하기 시작하려고 합니다. 이 책의 시작 부분(1장 1절부터)을 분석하여, 첫 학습 세션에 적합한, 내용상 자연스럽게 구분되는 첫 번째 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 예를 들어, '에베소서'를 선택했다면 '에베소서 1:1-2' 또는 '에베소서 1:1-14'와 같이 제안할 수 있습니다. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
     
     try {
-        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: {
-                    model: PPLX_MODEL,
-                    messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
-                }
+        const payload = {
+            apiKey,
+            endpoint: API_ENDPOINT,
+            payload: {
+                model: PPLX_MODEL,
+                messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
             }
+        };
+        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
+            body: { payload }
         });
         
         if (functionError || data.error || data.detail) {
@@ -98,15 +100,16 @@ export const getNextStudyTopic = async (currentTopic: string, apiKey: string): P
     const prompt = `현재 학습 주제는 '${currentTopic}'입니다. 이 구절 바로 다음에 이어지는, 내용상 자연스럽게 구분되는 다음 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
 
     try {
-        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: {
-                    model: PPLX_MODEL,
-                    messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
-                }
+        const payload = {
+            apiKey,
+            endpoint: API_ENDPOINT,
+            payload: {
+                model: PPLX_MODEL,
+                messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
             }
+        };
+        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
+            body: { payload }
         });
 
         if (functionError || data.error || data.detail) {
@@ -176,12 +179,13 @@ export const startLearningConversation = async (topic: string, apiKey: string, h
         const messages = buildHistory(systemInstruction, []);
         messages.push({ role: 'user', content: '학습을 시작해주세요.' });
 
+        const payload = {
+            apiKey,
+            endpoint: API_ENDPOINT,
+            payload: { model: PPLX_MODEL, messages }
+        };
         const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: { model: PPLX_MODEL, messages }
-            }
+            body: { payload }
         });
 
         if (functionError || data.error || data.detail) {
@@ -210,12 +214,13 @@ export const continueLearningConversation = async (currentHistory: ChatMessage[]
         const messages = buildHistory(systemInstruction, currentHistory);
         messages.push({ role: 'user', content: message });
         
+        const payload = {
+            apiKey,
+            endpoint: API_ENDPOINT,
+            payload: { model: PPLX_MODEL, messages }
+        };
         const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: {
-                apiKey,
-                endpoint: API_ENDPOINT,
-                payload: { model: PPLX_MODEL, messages }
-            }
+            body: { payload }
         });
 
         if (functionError || data.error || data.detail) {

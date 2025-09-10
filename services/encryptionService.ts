@@ -36,7 +36,7 @@ export const encrypt = async (text: string, token: string): Promise<string> => {
     const key = await getKey(token);
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const encoder = new TextEncoder();
-    const encodedText = encoder.encode(text);
+    const encodedText = encoder.encode(text.trim());
 
     const encryptedData = await crypto.subtle.encrypt(
         { name: ALGORITHM, iv },

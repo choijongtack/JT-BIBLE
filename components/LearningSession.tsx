@@ -303,8 +303,8 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       let responseText: string;
       if (aiModel === 'perplexity' && decryptedApiKey) {
         responseText = await continuePerplexityConversation(historyForApi.slice(0, -1), messageContent, decryptedApiKey);
-      } else if (aiModel === 'chatgpt' && decryptedApiKey) {
-        responseText = await continueChatGptConversation(historyForApi.slice(0, -1), messageContent, decryptedApiKey);
+      } else if (aiModel === 'chatgpt') {
+        responseText = await continueChatGptConversation(historyForApi.slice(0, -1), messageContent);
       } else {
         responseText = await continueGeminiConversation(historyForApi.slice(0, -1), messageContent);
       }
@@ -371,7 +371,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       let plainApiKey: string | undefined = encryptedApiKey;
 
       try {
-        if (plainApiKey && (aiModel === 'perplexity' || aiModel === 'chatgpt')) {
+        if (plainApiKey && aiModel === 'perplexity') {
             const session = await supabase.auth.getSession();
             if (!session.data.session?.access_token) {
                 throw new Error("API 키를 복호화하기 위한 인증 토큰을 찾을 수 없습니다.");
@@ -384,8 +384,8 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
         if (aiModel === 'perplexity' && plainApiKey) {
             initialResponse = await startPerplexityConversation(topic, plainApiKey);
-        } else if (aiModel === 'chatgpt' && plainApiKey) {
-            initialResponse = await startChatGptConversation(topic, plainApiKey);
+        } else if (aiModel === 'chatgpt') {
+            initialResponse = await startChatGptConversation(topic);
         } else {
             initialResponse = await startGeminiConversation(topic);
         }
