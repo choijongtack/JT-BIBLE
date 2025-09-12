@@ -19,7 +19,7 @@ import type { Session } from '@supabase/supabase-js';
 import { encrypt, decrypt } from './services/encryptionService';
 import type { BookProgress, AiModel } from './types';
 
-// FIX: A robust function to extract the correct Bible book name from a topic string.
+// A robust function to extract the correct Bible book name from a topic string.
 // It compares the topic against the full list of Bible books to avoid errors
 // with numbered books (e.g., "요한1서") or multi-word names.
 const ALL_BOOKS = [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS].sort((a, b) => b.length - a.length);
