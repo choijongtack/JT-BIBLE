@@ -1,5 +1,5 @@
 import React from 'react';
-import type { LearningSessionState } from '../types';
+import type { LearningSessionState, AiModel } from '../types';
 
 interface ResumeSessionPromptProps {
     session: LearningSessionState;
@@ -7,11 +7,21 @@ interface ResumeSessionPromptProps {
     onDiscard: () => void;
 }
 
+const AI_MODEL_NAMES: Record<AiModel, string> = {
+    gemini: 'Gemini',
+    perplexity: 'Perplexity',
+    chatgpt: 'ChatGPT',
+};
+
+
 const ResumeSessionPrompt: React.FC<ResumeSessionPromptProps> = ({ session, onResume, onDiscard }) => (
     <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-md mx-auto">
         <h2 className="text-3xl font-bold text-slate-100 mb-4">진행 중인 학습 발견</h2>
         <p className="text-slate-300 text-lg mb-6">
             <span className="font-bold text-blue-400">{session.topic}</span> 학습을 이어서 하시겠습니까?
+        </p>
+         <p className="text-slate-400 text-sm mb-6 -mt-2">
+            학습이 완료될 때까지는 기존 AI 모델({AI_MODEL_NAMES[session.aiModel]})을 유지합니다.
         </p>
         <div className="flex flex-col gap-4">
             <button

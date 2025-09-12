@@ -126,7 +126,8 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
         
         {isSigningUp && (
           <div>
-            <label htmlFor="confirm-password" a-label="block text-sm font-medium text-slate-300">
+            {/* FIX: Replaced invalid `a-label` attribute with `className`. */}
+            <label htmlFor="confirm-password" className="block text-sm font-medium text-slate-300">
               비밀번호 확인
             </label>
             <div className="mt-1">

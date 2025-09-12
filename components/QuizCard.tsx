@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { QuizQuestion } from '../types';
 import { QuestionType } from '../types';
 import { IconCheck, IconX } from '../constants';
@@ -18,19 +18,24 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
   const [isCorrect, setIsCorrect] = useState(false);
 
   useEffect(() => {
-    const answerCount = question.type === QuestionType.FILL_IN_THE_BLANK ? question.answers.length : 1;
-    setUserAnswers(Array(answerCount).fill(''));
+    if (question.type === QuestionType.FILL_IN_THE_BLANK) {
+      const blankCount = (question as import('../types').FillInTheBlankQuestion)
+        .verseTextParts.filter(p => p === '___').length;
+      setUserAnswers(Array(blankCount).fill(''));
+    } else {
+      setUserAnswers(['']);
+    }
     setIsSubmitted(false);
     setIsCorrect(false);
   }, [question]);
 
-  const handleInputChange = useCallback((index: number, value: string) => {
+  const handleInputChange = (index: number, value: string) => {
     setUserAnswers(currentAnswers => {
       const newAnswers = [...currentAnswers];
       newAnswers[index] = value;
       return newAnswers;
     });
-  }, []);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,7 +113,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
     );
   };
 
-  const canSubmit = userAnswers.every(answer => answer.trim() !== '');
+  const canSubmit = userAnswers.length > 0 && userAnswers.every(answer => answer.trim() !== '');
 
   return (
     <div className="w-full max-w-3xl mx-auto bg-slate-800/50 p-6 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">

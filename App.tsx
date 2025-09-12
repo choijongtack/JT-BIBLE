@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import type { AppStatus, LearningSessionState, Profile } from './types';
+import type { AppStatus, LearningSessionState, Profile, Quiz } from './types';
 import { LearningStep } from './constants';
 import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
@@ -13,7 +13,7 @@ import ProgressDebugPanel from './components/ProgressDebugPanel';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic } from './services/chatgptService';
-import { getProfile, updateUserProgress, saveActiveSession, logoutUser, createProfile, deleteUserAccount, testUpdateProgress, loginUser, registerUser } from './services/userDataService';
+import { getProfile, updateUserProgress, saveActiveSession, logoutUser, createProfile, deleteUserAccount, loginUser, registerUser } from './services/userDataService';
 import { supabase } from './services/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
 import { encrypt, decrypt } from './services/encryptionService';
@@ -194,35 +194,39 @@ const App: React.FC = () => {
 
             if (savedSession) {
                 if (savedSession.isComplete) {
+                    // This is not resuming, but starting the NEXT session for the same book.
+                    // The user's new AI model selection should apply.
                     setLoadingMessage(`'${savedSession.topic}' 이후의 학습 주제를 찾는 중...`);
-                    let plainApiKey: string | undefined = savedSession.apiKey;
-                     if (plainApiKey && savedSession.aiModel === 'perplexity') {
-                        if (!session?.access_token) throw new Error("API 키를 복호화하기 위한 인증 토큰을 찾을 수 없습니다.");
-                        plainApiKey = await decrypt(plainApiKey, session.access_token);
-                    }
-
+                    const newSelectedModel = aiModel || 'gemini';
+            
                     let nextTopic: string;
-                     if (savedSession.aiModel === 'perplexity' && plainApiKey) {
-                        nextTopic = await getNextPerplexityStudyTopic(savedSession.topic, plainApiKey);
-                    } else if (savedSession.aiModel === 'chatgpt') {
+                    if (newSelectedModel === 'perplexity' && apiKey) {
+                        nextTopic = await getNextPerplexityStudyTopic(savedSession.topic, apiKey);
+                    } else if (newSelectedModel === 'chatgpt') {
                         nextTopic = await getNextChatGptStudyTopic(savedSession.topic);
                     } else {
                         nextTopic = await getNextGeminiStudyTopic(savedSession.topic);
                     }
                     
+                    let encryptedApiKey: string | undefined = apiKey;
+                    if (apiKey && newSelectedModel === 'perplexity') {
+                        if (!session?.access_token) throw new Error("API 키를 암호화하기 위한 인증 토큰을 찾을 수 없습니다.");
+                        encryptedApiKey = await encrypt(apiKey, session.access_token);
+                    }
+            
                     sessionToStart = {
                         topic: nextTopic,
                         currentStep: LearningStep.ANALYSIS,
                         messages: [],
-                        aiModel: savedSession.aiModel,
-                        apiKey: savedSession.apiKey, // Keep Perplexity key
+                        aiModel: newSelectedModel,
+                        apiKey: newSelectedModel === 'perplexity' ? encryptedApiKey : undefined,
                         bibleVerse: null,
                         score: 0,
                         quizData: null,
                         currentQuestionIndex: 0
                     };
-
                 } else {
+                    // This is resuming an incomplete session. The old session state (including AI model) is preserved.
                     setLoadingMessage(`'${savedSession.topic}' 학습을 다시 시작합니다...`);
                     sessionToStart = savedSession;
                 }
@@ -376,6 +380,22 @@ const App: React.FC = () => {
         setStatus('finished');
     }, [activeSession, profile]);
 
+    const handleSkipTest = useCallback(async () => {
+        if (!activeSession) {
+            setStatus('idle');
+            return;
+        }
+    
+        // 세션이 삭제되었으므로 활성 세션을 지웁니다.
+        setActiveSession(null);
+        if (profile?.id) {
+            await saveActiveSession(null);
+        }
+        
+        // 메인 화면으로 돌아갑니다.
+        setStatus('idle');
+    }, [activeSession, profile?.id]);
+
     const handleStateChange = useCallback(async (newState: LearningSessionState) => {
         setActiveSession(newState);
         if (profile?.id) {
@@ -394,8 +414,15 @@ const App: React.FC = () => {
     }, []);
     
     const handleDiscard = useCallback(() => {
-        setStatus('idle');
-    }, []);
+        setActiveSession(null);
+        if(profile?.id) {
+          saveActiveSession(null).then(() => {
+             setStatus('idle');
+          });
+        } else {
+           setStatus('idle');
+        }
+    }, [profile?.id]);
 
     const handleBackToMain = useCallback(() => {
         setError(null);
@@ -435,7 +462,6 @@ const App: React.FC = () => {
                             profile={profile}
                             onLogout={handleLogout}
                             onDelete={handleDeleteUser}
-                            onTestUpdate={testUpdateProgress}
                             onGptKeySaved={handleGptKeySaved}
                         />
                     </div>
@@ -457,6 +483,7 @@ const App: React.FC = () => {
                     onFinish={handleFinishLearning}
                     onBack={handleBackToMain}
                     onSaveAndExit={handleSaveAndExit}
+                    onSkip={handleSkipTest}
                 />;
             case 'finished':
                 return <ResultsScreen 

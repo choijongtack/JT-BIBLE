@@ -13,11 +13,11 @@ interface WelcomeScreenProps {
     profile: Profile | null;
     onLogout: () => void;
     onDelete: () => void;
-    onTestUpdate: () => void;
+    //onTestUpdate: () => void;
     onGptKeySaved: () => void;
 }
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogout, onDelete, onTestUpdate, onGptKeySaved }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogout, onDelete, onGptKeySaved }) => {
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
     
@@ -268,15 +268,16 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
                 </div>
                 <div className="text-center">
                     <h1 className="text-3xl sm:text-4xl font-bold text-slate-100">성경 공부 도우미</h1>
-                    <p className="text-lg text-slate-300 mt-1">변호사의 방법</p>
+                    <p className="text-lg text-slate-300 mt-1">4단계 학습 방법</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 mt-4 sm:mt-0 sm:flex-1 sm:justify-end">
-                    <button
-                        onClick={onTestUpdate}
-                        className="px-4 py-2 text-yellow-400 font-semibold rounded-lg hover:bg-yellow-900/50 hover:text-yellow-300 transition-colors text-sm"
-                    >
-                        업데이트 테스트
-                    </button>
+                    {/* FIX: Replaced invalid `//` comments with valid JSX block comments to prevent parsing errors. */}
+                    {/* <button
+                       onClick={onTestUpdate}
+                       className="px-4 py-2 text-yellow-400 font-semibold rounded-lg hover:bg-yellow-900/50 hover:text-yellow-300 transition-colors text-sm"
+                   >
+                       업데이트 테스트
+                   </button> */}
                     <button
                         onClick={onDelete}
                         className="px-4 py-2 text-red-400 font-semibold rounded-lg hover:bg-red-900/50 hover:text-red-300 transition-colors text-sm"
@@ -354,7 +355,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
                                 onClick={() => setSelectedAI('chatgpt')}
                                 className={`px-5 py-2 rounded-lg font-semibold transition-all ${selectedAI === 'chatgpt' ? 'bg-teal-600 text-white ring-2 ring-teal-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}
                             >
-                                ChatGPT 4.o
+                                {/* FIX: Corrected typo from "4.o" to "4.0". */}
+                                ChatGPT 4.0
                             </button>
                         </div>
                     </div>

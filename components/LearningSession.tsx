@@ -3,7 +3,7 @@ import { startLearningConversation as startGeminiConversation, continueLearningC
 import { startLearningConversation as startPerplexityConversation, continueLearningConversation as continuePerplexityConversation } from '../services/perplexityService';
 import { startLearningConversation as startChatGptConversation, continueLearningConversation as continueChatGptConversation } from '../services/chatgptService';
 import { LearningStep } from '../constants';
-import type { Quiz, ChatMessage, LearningSessionState } from '../types';
+import type { Quiz, ChatMessage, LearningSessionState, AiModel } from '../types';
 import { QuestionType } from '../types';
 import QuizCard from './QuizCard';
 import { decrypt } from '../services/encryptionService';
@@ -15,6 +15,7 @@ interface ConversationalLearningProps {
   onFinish: (score: number, total: number) => void;
   onBack: () => void;
   onSaveAndExit: () => void;
+  onSkip: () => void;
 }
 
 interface ProcessedResponse {
@@ -24,6 +25,13 @@ interface ProcessedResponse {
   verseExtracted?: string;
   isComplete?: boolean;
 }
+
+const AI_MODEL_DISPLAY_NAMES: Record<AiModel, string> = {
+  gemini: 'Gemini 2.5 Flash',
+  perplexity: 'Perplexity Sonar',
+  chatgpt: 'ChatGPT 4.0'
+};
+
 
 // ---------------- UI 보조 컴포넌트 ----------------
 const LoadingDots: React.FC = () => (
@@ -206,7 +214,7 @@ const StepControl: React.FC<{
 
 
 // ---------------- 메인 컴포넌트 ----------------
-const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit }) => {
+const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip }) => {
   const { topic, aiModel, apiKey: encryptedApiKey } = savedSession;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<LearningStep>(savedSession.currentStep);
@@ -220,7 +228,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(savedSession.currentQuestionIndex);
   const [score, setScore] = useState(savedSession.score);
-  const [isCompleted, setIsCompleted] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(savedSession.isComplete ?? false);
   
   // 모바일 UI 상태
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
@@ -423,17 +431,20 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     if (!isMounted.current) return;
 
     const newState: LearningSessionState = {
-      ...savedSession,
+      topic: topic,
+      aiModel: aiModel,
+      apiKey: encryptedApiKey,
       messages: chatHistory,
       currentStep,
       bibleVerse,
       quizData,
       currentQuestionIndex,
       score,
+      isComplete: isCompleted,
     };
 
     onStateChange(newState);
-  }, [chatHistory, currentStep, bibleVerse, quizData, currentQuestionIndex, score, onStateChange, savedSession]);
+  }, [chatHistory, currentStep, bibleVerse, quizData, currentQuestionIndex, score, isCompleted, onStateChange, topic, aiModel, encryptedApiKey]);
   
   const handleQuizSubmit = (userAnswers: string[]): boolean => {
     const currentQuestion = quizData?.questions[currentQuestionIndex];
@@ -441,10 +452,18 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
     let isCorrect = false;
     if (currentQuestion.type === QuestionType.FILL_IN_THE_BLANK) {
+        // To be correct, number of answers must match and not be zero.
+        if (userAnswers.length !== currentQuestion.answers.length || currentQuestion.answers.length === 0) {
+            return false;
+        }
         isCorrect = userAnswers.every((ans, i) => 
             ans.trim().toLowerCase() === currentQuestion.answers[i].trim().toLowerCase()
         );
     } else if (currentQuestion.type === QuestionType.QUESTION_ANSWER) {
+        // To be correct, there must be one answer.
+        if (userAnswers.length !== 1) {
+            return false;
+        }
         isCorrect = userAnswers[0].trim().toLowerCase() === currentQuestion.answer.trim().toLowerCase();
     }
 
@@ -468,7 +487,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   };
 
   const handleQuizSkip = () => {
-    onSaveAndExit();
+    onSkip();
   };
 
   const StepSelectionModal: React.FC = () => {
@@ -548,11 +567,16 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       <div className="w-full h-[95vh] max-w-7xl mx-auto p-2 sm:p-6 flex flex-col sm:flex-row gap-6">
         <BibleVersePanel topic={topic} verse={bibleVerse} />
         <div className="flex-1 flex flex-col bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 overflow-hidden">
-          <div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center flex-shrink-0">
-            <h2 className="text-xl font-bold text-slate-100 truncate pr-4" title={topic}>{topic}</h2>
+          <div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center flex-shrink-0 gap-4">
+            <div className="flex-1 min-w-0">
+                <h2 className="text-xl font-bold text-slate-100 truncate" title={topic}>{topic}</h2>
+                <p className="text-xs text-blue-400 mt-1">
+                    AI 모델: {AI_MODEL_DISPLAY_NAMES[aiModel]}
+                </p>
+            </div>
             
             {/* --- Desktop Buttons --- */}
-            <div className="hidden sm:flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
                 <StepControl onStepSelect={handleForceStepChange} currentStep={currentStep} isLoading={isLoading} />
                 <button
                   onClick={handleAdvanceStepRequest}
@@ -570,7 +594,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
             </div>
 
             {/* --- Mobile Options Menu --- */}
-            <div className="relative sm:hidden" ref={optionsMenuRef}>
+            <div className="relative sm:hidden flex-shrink-0" ref={optionsMenuRef}>
               <button
                 onClick={() => setIsOptionsOpen(prev => !prev)}
                 className="p-2 rounded-full hover:bg-slate-700 transition-colors"
