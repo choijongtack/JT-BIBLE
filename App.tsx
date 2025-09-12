@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { AppStatus, LearningSessionState, Profile, Quiz } from './types';
-import { LearningStep } from './constants';
+import { LearningStep, OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS } from './constants';
 import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
 import WelcomeScreen from './components/WelcomeScreen';
@@ -18,6 +18,24 @@ import { supabase } from './services/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
 import { encrypt, decrypt } from './services/encryptionService';
 import type { BookProgress, AiModel } from './types';
+
+// FIX: A robust function to extract the correct Bible book name from a topic string.
+// It compares the topic against the full list of Bible books to avoid errors
+// with numbered books (e.g., "요한1서") or multi-word names.
+const ALL_BOOKS = [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS].sort((a, b) => b.length - a.length);
+
+const getBookFromTopic = (topic: string): string => {
+    if (!topic || typeof topic !== 'string') {
+        // Return a default or handle error appropriately.
+        return 'Unknown';
+    }
+    // Find the book name that the topic string starts with.
+    // The list is sorted by length descending to match longer names first (e.g., "요한1서" before "요한").
+    const foundBook = ALL_BOOKS.find(bookName => topic.trim().startsWith(bookName));
+
+    // Fallback to the old logic if no match is found, which should be rare.
+    return foundBook || topic.split(' ')[0];
+};
 
 
 const App: React.FC = () => {
@@ -279,8 +297,7 @@ const App: React.FC = () => {
 
         setProgressDebugInfo(null); 
 
-        const match = activeSession.topic.match(/^[가-힣]+/);
-        const book = match ? match[0] : activeSession.topic;
+        const book = getBookFromTopic(activeSession.topic);
         
         const currentBookProgress = profile.progress?.[book] || {
             lastSession: activeSession,
@@ -335,8 +352,7 @@ const App: React.FC = () => {
     
         const sessionTopic = activeSession.topic;
     
-        const match = sessionTopic.match(/^[가-힣]+/);
-        const book = match ? match[0] : sessionTopic;
+        const book = getBookFromTopic(sessionTopic);
         
         const currentBookProgress = profile.progress?.[book] || {
             lastSession: activeSession,
