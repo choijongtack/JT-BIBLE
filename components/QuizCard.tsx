@@ -18,25 +18,48 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
   const [isCorrect, setIsCorrect] = useState(false);
 
   useEffect(() => {
+    console.log('=== QuizCard Debug ===');
+    console.log('Question:', question);
+    console.log('Question type:', question.type);
+    console.log('QuestionType.FILL_IN_THE_BLANK:', QuestionType.FILL_IN_THE_BLANK);
+    console.log('Type match:', question.type === QuestionType.FILL_IN_THE_BLANK);
+  
     if (question.type === QuestionType.FILL_IN_THE_BLANK) {
-      const blankCount = (question as import('../types').FillInTheBlankQuestion)
-        .verseTextParts.filter(p => p === '___').length;
+      const q = question as import('../types').FillInTheBlankQuestion;
+      console.log('verseTextParts:', q.verseTextParts);
+      let blankCount = q.verseTextParts.filter(p => p === '___').length;
+
+    // --- 🔥 방어 로직: blanks가 없는데 answers는 있는 경우 ---
+      if (blankCount === 0 && q.answers.length > 0) {
+        console.warn("⚠ verseTextParts에 blank 없음. 강제로 blanks 삽입.");
+        q.verseTextParts = [q.verseTextParts.join(' '), ...Array(q.answers.length).fill('___')];
+        blankCount = q.answers.length;
+      }
+
+      console.log('Blank count (final):', blankCount);
       setUserAnswers(Array(blankCount).fill(''));
     } else {
+      console.log('Setting single answer');
       setUserAnswers(['']);
     }
     setIsSubmitted(false);
     setIsCorrect(false);
   }, [question]);
 
+    
   const handleInputChange = (index: number, value: string) => {
+    console.log(`Input change - Index: ${index}, Value: "${value}"`);
+    console.log('Current userAnswers:', userAnswers);
+  
     setUserAnswers(currentAnswers => {
       const newAnswers = [...currentAnswers];
       newAnswers[index] = value;
+      console.log('New userAnswers:', newAnswers);
       return newAnswers;
     });
   };
-
+  
+  
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitted) return;

@@ -16,6 +16,7 @@ interface ConversationalLearningProps {
   onBack: () => void;
   onSaveAndExit: () => void;
   onSkip: () => void;
+  onSystemBack: () => void;
 }
 
 interface ProcessedResponse {
@@ -214,7 +215,7 @@ const StepControl: React.FC<{
 
 
 // ---------------- 메인 컴포넌트 ----------------
-const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip }) => {
+const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip, onSystemBack }) => {
   const { topic, aiModel, apiKey: encryptedApiKey } = savedSession;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<LearningStep>(savedSession.currentStep);
@@ -237,6 +238,25 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isMounted = useRef(false);
+  
+  // This effect handles the mobile back button press.
+  useEffect(() => {
+    // When the component mounts, push a new state to the history.
+    window.history.pushState({ page: 'learning-session' }, '');
+
+    const handleBackButton = (event: PopStateEvent) => {
+      // When the user navigates back, the `popstate` event is triggered.
+      // We then call onSystemBack to save the session and return to the main menu.
+      onSystemBack();
+    };
+
+    window.addEventListener('popstate', handleBackButton);
+
+    // Cleanup: remove the event listener when the component unmounts.
+    return () => {
+      window.removeEventListener('popstate', handleBackButton);
+    };
+  }, [onSystemBack]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -248,50 +268,92 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const processAIResponse = useCallback((text: string): ProcessedResponse => {
-    let cleanedText = text;
-    const result: ProcessedResponse = { cleanedText: '' };
+ const processAIResponse = useCallback((text: string): ProcessedResponse => {
+  let cleanedText = text;
+  const result: ProcessedResponse = { cleanedText: '' };
 
-    const verseMatch = cleanedText.match(/\[BIBLE_VERSE\]([\s\S]*?)\[\/BIBLE_VERSE\]/);
-    if (verseMatch && verseMatch[1]) {
-      const verse = verseMatch[1].trim();
-      if (verse) result.verseExtracted = verse;
-      cleanedText = cleanedText.replace(verseMatch[0], '').trim();
-    }
+  const verseMatch = cleanedText.match(/\[BIBLE_VERSE\]([\s\S]*?)\[\/BIBLE_VERSE\]/);
+  if (verseMatch && verseMatch[1]) {
+    const verse = verseMatch[1].trim();
+    if (verse) result.verseExtracted = verse;
+    cleanedText = cleanedText.replace(verseMatch[0], '').trim();
+  }
 
-    const stepMatch = cleanedText.match(/\[NEXT_STEP:(\w+)\]/);
-    if (stepMatch && stepMatch[1]) {
-      const nextStepKey = stepMatch[1].toUpperCase() as keyof typeof LearningStep;
-      const stepValue = LearningStep[nextStepKey];
-      if (stepValue) result.stepChangedTo = stepValue;
-      cleanedText = cleanedText.replace(stepMatch[0], '').trim();
-    }
+  const stepMatch = cleanedText.match(/\[NEXT_STEP:(\w+)\]/);
+  if (stepMatch && stepMatch[1]) {
+    const nextStepKey = stepMatch[1].toUpperCase() as keyof typeof LearningStep;
+    const stepValue = LearningStep[nextStepKey];
+    if (stepValue) result.stepChangedTo = stepValue;
+    cleanedText = cleanedText.replace(stepMatch[0], '').trim();
+  }
 
-    const testMatch = cleanedText.match(/\[START_TEST\]/);
-    if (testMatch) {
-      cleanedText = cleanedText.replace(testMatch[0], '').trim();
-      try {
-        const jsonStartIndex = cleanedText.search(/[{\[]/);
-        if (jsonStartIndex !== -1) {
-          const quizJsonString = cleanedText.substring(jsonStartIndex);
-          const parsedQuiz = JSON.parse(quizJsonString) as Quiz;
-          result.quizStarted = parsedQuiz;
-          cleanedText = cleanedText.substring(0, jsonStartIndex).trim();
+  const testMatch = cleanedText.match(/\[START_TEST\]/);
+  if (testMatch) {
+    cleanedText = cleanedText.replace(testMatch[0], '').trim();
+    try {
+      const jsonStartIndex = cleanedText.search(/[{\[]/);
+      if (jsonStartIndex !== -1) {
+        const quizJsonString = cleanedText.substring(jsonStartIndex);
+        const parsedQuiz = JSON.parse(quizJsonString) as Quiz;
+
+        if (parsedQuiz && parsedQuiz.questions) {
+          parsedQuiz.questions.forEach(q => {
+            if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+              const question = q as import('../types').FillInTheBlankQuestion;
+
+              // --- 🔥 verseTextParts 보정 로직 ---
+              if (question.verseTextParts.length === 1) {
+                const fullVerse = question.verseTextParts[0];
+                const parts = fullVerse
+                  .split(/(___|__)/g)
+                  .map(p => (p === '__' || p === '___' ? '___' : p))
+                  .filter(p => p && p.length > 0);
+                question.verseTextParts = parts;
+              }
+
+              const existingBlanks = question.verseTextParts.filter(p => p === '___').length;
+              if (existingBlanks !== question.answers.length) {
+                const fullVerse = question.verseTextParts.join('');
+                const parts = fullVerse
+                  .split(/(___|__)/g)
+                  .map(p => (p === '__' || p === '___' ? '___' : p))
+                  .filter(p => p && p.length > 0);
+
+                const newBlankCount = parts.filter(p => p === '___').length;
+                if (newBlankCount === question.answers.length) {
+                  question.verseTextParts = parts;
+                } else {
+                  console.warn("❗ FILL_IN_THE_BLANK 보정 실패", {
+                    original: question.verseTextParts,
+                    reconstructed: parts,
+                    answers: question.answers,
+                  });
+
+                  // answers 개수만큼 강제로 blanks 삽입
+                  question.verseTextParts = [fullVerse, ...Array(question.answers.length).fill('___')];
+                }
+              }
+            }
+          });
         }
-      } catch {
-        setError("퀴즈 데이터를 처리하는 중 오류가 발생했습니다.");
-      }
-    }
-    
-    const completeMatch = cleanedText.match(/\[COMPLETE\]/);
-    if (completeMatch) {
-      result.isComplete = true;
-      cleanedText = cleanedText.replace(completeMatch[0], '').trim();
-    }
 
-    result.cleanedText = cleanedText;
-    return result;
-  }, []);
+        result.quizStarted = parsedQuiz;
+        cleanedText = cleanedText.substring(0, jsonStartIndex).trim();
+      }
+    } catch {
+      setError("퀴즈 데이터를 처리하는 중 오류가 발생했습니다.");
+    }
+  }
+
+  const completeMatch = cleanedText.match(/\[COMPLETE\]/);
+  if (completeMatch) {
+    result.isComplete = true;
+    cleanedText = cleanedText.replace(completeMatch[0], '').trim();
+  }
+
+  result.cleanedText = cleanedText;
+  return result;
+}, []); 
 
   const sendMessage = useCallback(async (messageContent: string) => {
     if (!messageContent.trim() || isLoading) return;

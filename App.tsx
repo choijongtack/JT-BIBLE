@@ -326,59 +326,74 @@ const App: React.FC = () => {
         setStatus('finished');
     }, [activeSession, profile]);
     
-    const handleSaveAndExit = useCallback(async () => {
+    const saveCurrentSession = useCallback(async () => {
         if (!activeSession || !profile || typeof activeSession.topic !== 'string' || !activeSession.topic) {
-            console.error("handleSaveAndExit called with invalid activeSession or missing topic.", activeSession);
-            setStatus('idle');
             setActiveSession(null);
-            if (profile?.id) {
-                await saveActiveSession(null);
-            }
-            return;
+            if (profile?.id) await saveActiveSession(null);
+            return { success: false, fromError: false, result: null };
         }
-
-        setProgressDebugInfo(null);
-
-        const match = activeSession.topic.match(/^[가-힣]+/);
-        const book = match ? match[0] : activeSession.topic;
+    
+        const sessionTopic = activeSession.topic;
+    
+        const match = sessionTopic.match(/^[가-힣]+/);
+        const book = match ? match[0] : sessionTopic;
         
         const currentBookProgress = profile.progress?.[book] || {
             lastSession: activeSession,
             completedTopics: []
         };
-
+    
         const sessionToSave = { ...activeSession, isComplete: false };
         
         const newBookProgress: BookProgress = {
             ...currentBookProgress,
             lastSession: sessionToSave
         };
-
+    
         const result = await updateUserProgress(book, newBookProgress);
-        setProgressDebugInfo(result);
-
+    
         if (result.error || !result.after) {
             const errorMessage = result.error || '진행 상황을 업데이트하는 데 실패했습니다.';
             setError(errorMessage);
-            setStatus('error');
-            return;
+            return { success: false, fromError: true, result };
         }
-
+    
         setProfile(prev => prev ? { ...prev, progress: result.after } : null);
-
-        setLastSessionResult({
-            score: -1, 
-            total: 0,
-            topic: activeSession.topic,
-            exitType: 'save'
-        });
-
+        await saveActiveSession(null);
         setActiveSession(null);
-        if (profile?.id) {
-            await saveActiveSession(null);
-        }
-        setStatus('finished');
+        return { success: true, topic: sessionTopic, result };
+    
     }, [activeSession, profile]);
+
+    const handleSaveAndExit = useCallback(async () => {
+        const { success, fromError, topic, result } = await saveCurrentSession();
+        setProgressDebugInfo(result);
+
+        if (success) {
+            setLastSessionResult({
+                score: -1, 
+                total: 0,
+                topic: topic || '',
+                exitType: 'save'
+            });
+            setStatus('finished');
+        } else if (fromError) {
+            setStatus('error');
+        } else {
+            setStatus('idle');
+        }
+    }, [saveCurrentSession]);
+
+    const handleSystemBack = useCallback(async () => {
+        const { fromError, result } = await saveCurrentSession();
+        if (fromError) {
+            setProgressDebugInfo(result);
+            setStatus('error');
+        } else {
+            setStatus('idle');
+        }
+    }, [saveCurrentSession]);
+
 
     const handleSkipTest = useCallback(async () => {
         if (!activeSession) {
@@ -484,6 +499,7 @@ const App: React.FC = () => {
                     onBack={handleBackToMain}
                     onSaveAndExit={handleSaveAndExit}
                     onSkip={handleSkipTest}
+                    onSystemBack={handleSystemBack}
                 />;
             case 'finished':
                 return <ResultsScreen 
