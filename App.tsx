@@ -311,8 +311,8 @@ const App: React.FC = () => {
             ...activeSession, 
             isComplete: true,
             messages: [], 
-            currentStep: LearningStep.ANALYSIS,
             bibleVerse: null,
+            currentStep: LearningStep.ANALYSIS,
             quizData: null,
             currentQuestionIndex: 0,
             score: 0

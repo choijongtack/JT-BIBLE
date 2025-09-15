@@ -393,7 +393,9 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         setMessages(prev => [...prev, { role: 'model', content: processed.cleanedText }]);
       }
   
-      if (processed.verseExtracted) setBibleVerse(processed.verseExtracted);
+      if (processed.verseExtracted) {
+        setBibleVerse(prevVerse => prevVerse || processed.verseExtracted);
+      }
       if (processed.quizStarted) setQuizData(processed.quizStarted);
       if (processed.isComplete) setIsCompleted(true);
   
