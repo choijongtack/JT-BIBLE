@@ -239,6 +239,31 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isMounted = useRef(false);
   
+  // 학습 도중 다른 창으로 이동하면 세션 저장 후 종료
+  useEffect(() => {
+    const isSavingRef = { current: false }; // 중복 실행 방지 플래그
+
+    const handleVisibilityChange = async () => {
+      if (document.hidden && !isSavingRef.current) {
+        isSavingRef.current = true;
+        try {
+          console.log("학습 도중 다른 창으로 이동 → 세션 저장 후 종료");
+          await onSaveAndExit();  // DB 저장 + 상태 변경
+        } catch (err) {
+          console.error("세션 저장 후 종료 실패:", err);
+        } finally {
+          isSavingRef.current = false;
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [onSaveAndExit]);
+
+  
   // This effect handles the mobile back button press.
   useEffect(() => {
     // When the component mounts, push a new state to the history.

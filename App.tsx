@@ -18,6 +18,9 @@ import { supabase } from './services/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
 import { encrypt, decrypt } from './services/encryptionService';
 import type { BookProgress, AiModel } from './types';
+// App.tsx 상단 import 부분에 추가
+import { useBeforeunload } from 'react-beforeunload'; // ✨ 창 닫기 이벤트
+
 
 // A robust function to extract the correct Bible book name from a topic string.
 // It compares the topic against the full list of Bible books to avoid errors
@@ -61,6 +64,77 @@ const App: React.FC = () => {
     } | null>(null);
     
     const statusRef = useRef(status);
+
+    const [endedByUser, setEndedByUser] = useState(false); // ✨ 학습 종료 플래그
+    const endedByUserRef = useRef(false);   // ✨ 최신 endedByUser 값 보관
+    const profileRef = useRef<Profile | null>(null); // ✨ 최신 profile 값 보관
+
+    
+    // App 컴포넌트 안쪽 useEffect 위쪽에 추가 ✨ LocalStorage 초기 로드
+    useEffect(() => {
+        try {
+            const savedProfile = localStorage.getItem("profile");
+            const savedSession = localStorage.getItem("activeSession");
+            if (savedProfile) setProfile(JSON.parse(savedProfile));
+            if (savedSession) setActiveSession(JSON.parse(savedSession));
+            if (savedProfile) {
+                setStatus('idle'); // 프로필이 있으면 바로 환영화면으로
+                setLoadingMessage("LocalStorage에서 상태 복원됨");
+            }
+        } catch (e) {
+            console.warn("LocalStorage 로드 실패:", e);
+        }
+    }, []);
+
+    useEffect(() => {
+    endedByUserRef.current = endedByUser;
+    }, [endedByUser]);
+
+    useEffect(() => {
+    profileRef.current = profile;
+    }, [profile]);
+
+
+   
+    // ✨ 추가: 크롬 창 전환 시 localStorage 저장/복원
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                if (profile) localStorage.setItem("profile", JSON.stringify(profile));
+                if (activeSession) localStorage.setItem("activeSession", JSON.stringify(activeSession));
+            } else {
+                try {
+                    const savedProfile = localStorage.getItem("profile");
+                    const savedSession = localStorage.getItem("activeSession");
+                    if (savedProfile) setProfile(JSON.parse(savedProfile));
+                    if (savedSession) setActiveSession(JSON.parse(savedSession));
+                } catch (e) {
+                    console.warn("visibilitychange 복원 실패:", e);
+                }
+            }
+        };
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    }, [profile, activeSession]);
+
+
+
+    useBeforeunload(async () => {
+        try {
+            if (activeSession && profile?.id) {
+                await saveActiveSession(activeSession); // 세션 저장
+                const book = getBookFromTopic(activeSession.topic);
+                await updateUserProgress(book, {
+                    lastSession: activeSession,
+                    completedTopics: profile.progress?.[book]?.completedTopics || []
+                });
+            }
+            await logoutUser(); // 로그아웃
+        } catch (err) {
+            console.error("beforeunload 처리 중 오류:", err);
+        }
+    });
+
     useEffect(() => {
         statusRef.current = status;
     }, [status]);
@@ -82,6 +156,20 @@ const App: React.FC = () => {
             }
             
             if (statusRef.current === 'profile_error') return;
+ 
+            // ✨ 학습 종료 후엔 프로필 재조회 스킵
+            //if (endedByUserRef.current) {
+            //    console.log("사용자 요청으로 학습 종료됨 → idle 유지");
+            //    endedByUserRef.current = false; // 플래그 초기화
+            //    setStatus('idle');
+            //    return;
+            //}
+
+            // ✨ 이미 프로필 있고 idle/finished 상태라면 그대로 둠
+            if (profileRef.current && ['idle', 'finished'].includes(statusRef.current)) {
+                console.log("세션 유지: 기존 프로필 그대로 사용");
+                return;
+            }
 
             if (statusRef.current !== 'loading') {
                 setStatus('loading');
@@ -89,6 +177,7 @@ const App: React.FC = () => {
 
             setLoadingMessage('세션 확인됨. 프로필 조회 시도 중...');
             setAuthError(null);
+            
             try {
                 let userProfile = await getProfile();
                 
@@ -100,6 +189,15 @@ const App: React.FC = () => {
                     }
                 } else {
                      setLoadingMessage('기존 프로필을 성공적으로 불러왔습니다.');
+                }
+
+                 // ✨ Supabase 실패 시 localStorage fallback
+                if (!userProfile) {
+                    const savedProfile = localStorage.getItem("profile");
+                    if (savedProfile) {
+                        userProfile = JSON.parse(savedProfile);
+                        console.warn("Supabase 프로필 조회 실패 → localStorage로 대체");
+                    }
                 }
 
                 if (!userProfile) {
@@ -130,6 +228,14 @@ const App: React.FC = () => {
                     setStatus('idle');
                 }
             } catch (e) {
+                // ✨ 수정: catch에서도 localStorage fallback 시도
+                const savedProfile = localStorage.getItem("profile"); // ✨ 수정
+                if (savedProfile) { // ✨ 수정
+                    setProfile(JSON.parse(savedProfile)); // ✨ 수정
+                    setStatus('idle'); // ✨ 수정
+                    return; // ✨ 수정
+                }
+                
                 const errorMessage = e instanceof Error ? e.message : "프로필을 로드하는 동안 알 수 없는 오류가 발생했습니다.";
                 console.error("Profile loading/creation failed:", errorMessage);
                 
@@ -141,8 +247,8 @@ const App: React.FC = () => {
         return () => {
             subscription.unsubscribe();
         };
-    }, []);
-
+    }, []); // ✨ FIX: Dependency array changed from [profile] to []
+    
     const handleLogin = useCallback(async (email: string, password: string) => {
         try {
             setAuthError(null);
@@ -333,7 +439,12 @@ const App: React.FC = () => {
             return;
         }
 
-        setProfile(prev => prev ? { ...prev, progress: result.after } : null);
+        setProfile(prev => {
+            const updated = prev ? { ...prev, progress: result.after } : null;
+            if (updated) localStorage.setItem("profile", JSON.stringify(updated)); // 추가
+            return updated;
+        });
+          
         
         setLastSessionResult({ score, total, topic: activeSession.topic, exitType: 'quiz' });
         setActiveSession(null);
@@ -386,6 +497,7 @@ const App: React.FC = () => {
         setProgressDebugInfo(result);
 
         if (success) {
+            setEndedByUser(true); // ✨ 학습창에서 정상 종료됨 표시
             setLastSessionResult({
                 score: -1, 
                 total: 0,
@@ -429,6 +541,7 @@ const App: React.FC = () => {
 
     const handleStateChange = useCallback(async (newState: LearningSessionState) => {
         setActiveSession(newState);
+        localStorage.setItem("activeSession", JSON.stringify(newState)); // 추가
         if (profile?.id) {
             await saveActiveSession(newState);
         }
