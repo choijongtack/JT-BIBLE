@@ -360,7 +360,32 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
               }
             }
           });
-        }
+          // --- ✅ 추가: bibleVerse 검증 로직 (암송 & 시험 공통) --- 250915
+          if (bibleVerse) {
+            parsedQuiz.questions = parsedQuiz.questions.filter(q => {
+              if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+                const verseString = q.verseTextParts.join('');
+                if (!bibleVerse.includes(verseString.replace(/___/g, ''))) {
+                  console.warn("❗ Quiz verse mismatch detected (FILL_IN_THE_BLANK)", {
+                    expected: bibleVerse,
+                    got: verseString
+                  });
+                  return false; // ❌ 엉뚱한 구절은 제외
+                }
+              }
+              if (q.type === QuestionType.QUESTION_ANSWER) {
+                if (!bibleVerse.includes(q.verseReference)) {
+                  console.warn("❗ Quiz verse mismatch detected (QUESTION_ANSWER)", {
+                    expected: bibleVerse,
+                    got: q.verseReference
+                  });
+                  return false; // ❌ 엉뚱한 구절은 제외
+                }
+              }
+              return true;
+            });
+          }
+        }         
 
         result.quizStarted = parsedQuiz;
         cleanedText = cleanedText.substring(0, jsonStartIndex).trim();
