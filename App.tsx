@@ -20,6 +20,7 @@ import { encrypt, decrypt } from './services/encryptionService';
 import type { BookProgress, AiModel } from './types';
 // App.tsx 상단 import 부분에 추가
 import { useBeforeunload } from 'react-beforeunload'; // ✨ 창 닫기 이벤트
+import { getBibleVerse } from './services/bibleService';
 
 
 // A robust function to extract the correct Bible book name from a topic string.
@@ -332,6 +333,9 @@ const App: React.FC = () => {
                         nextTopic = await getNextGeminiStudyTopic(savedSession.topic);
                     }
                     
+                    setLoadingMessage(`'${nextTopic}' 본문을 불러오는 중...`);
+                    const { text: bibleVerse } = await getBibleVerse(nextTopic);
+
                     let encryptedApiKey: string | undefined = apiKey;
                     if (apiKey && newSelectedModel === 'perplexity') {
                         if (!session?.access_token) throw new Error("API 키를 암호화하기 위한 인증 토큰을 찾을 수 없습니다.");
@@ -344,7 +348,7 @@ const App: React.FC = () => {
                         messages: [],
                         aiModel: newSelectedModel,
                         apiKey: newSelectedModel === 'perplexity' ? encryptedApiKey : undefined,
-                        bibleVerse: null,
+                        bibleVerse: bibleVerse,
                         score: 0,
                         quizData: null,
                         currentQuestionIndex: 0
@@ -364,6 +368,9 @@ const App: React.FC = () => {
                 } else {
                     firstTopic = await getGeminiStudyTopic(book);
                 }
+
+                setLoadingMessage(`'${firstTopic}' 본문을 불러오는 중...`);
+                const { text: bibleVerse } = await getBibleVerse(firstTopic);
                 
                 let encryptedApiKey: string | undefined = apiKey;
                 if (apiKey && (aiModel === 'perplexity')) { // Only Perplexity key is encrypted and stored in session state
@@ -377,7 +384,7 @@ const App: React.FC = () => {
                     messages: [],
                     aiModel: aiModel || 'gemini',
                     apiKey: aiModel === 'perplexity' ? encryptedApiKey : undefined,
-                    bibleVerse: null,
+                    bibleVerse: bibleVerse,
                     score: 0,
                     quizData: null,
                     currentQuestionIndex: 0

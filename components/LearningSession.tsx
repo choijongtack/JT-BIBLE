@@ -8,6 +8,7 @@ import { QuestionType } from '../types';
 import QuizCard from './QuizCard';
 import { decrypt } from '../services/encryptionService';
 import { supabase } from '../services/supabaseClient';
+import { getBibleVerse } from '../services/bibleService';
 
 interface ConversationalLearningProps {
   savedSession: LearningSessionState;
@@ -69,7 +70,9 @@ const BibleVerseModal: React.FC<{
   onClose: () => void;
   topic: string;
   verse: string | null;
-}> = ({ isOpen, onClose, topic, verse }) => {
+  source: 'DB' | 'AI' | null;
+  fetchError: string | null;
+}> = ({ isOpen, onClose, topic, verse, source, fetchError }) => {
   if (!isOpen) return null;
 
   return (
@@ -84,7 +87,14 @@ const BibleVerseModal: React.FC<{
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-4 sm:p-6 border-b border-slate-700 flex-shrink-0 flex justify-between items-center">
-          <h2 className="text-xl font-bold text-slate-100">{topic} 본문</h2>
+            <div className="flex items-baseline gap-3">
+                <h2 className="text-xl font-bold text-slate-100">{topic} 본문</h2>
+                {source && (
+                    <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${source === 'DB' ? 'bg-green-600 text-green-100' : 'bg-yellow-600 text-yellow-100'}`}>
+                        {source}
+                    </span>
+                )}
+            </div>
           <button onClick={onClose} className="p-1 rounded-full hover:bg-slate-700" aria-label="Close">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-slate-400">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -92,11 +102,17 @@ const BibleVerseModal: React.FC<{
           </button>
         </div>
         <div className="p-4 sm:p-6 overflow-y-auto">
-          {verse ? (
-            <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{verse}</p>
-          ) : (
-            <p className="text-slate-400">성경 본문을 불러오는 중입니다...</p>
-          )}
+            {fetchError && (
+                <div className="mb-4 p-3 bg-yellow-900/50 border border-yellow-700 rounded-lg text-sm text-yellow-300">
+                    <p className="font-bold mb-1">DB 불러오기 실패 (AI 대체)</p>
+                    <p>{fetchError}</p>
+                </div>
+            )}
+            {verse ? (
+                <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{verse}</p>
+            ) : (
+                <p className="text-slate-400">성경 본문을 불러오는 중입니다...</p>
+            )}
         </div>
       </div>
     </div>
@@ -104,7 +120,7 @@ const BibleVerseModal: React.FC<{
 };
 
 
-const BibleVersePanel: React.FC<{ topic: string, verse: string | null }> = ({ topic, verse }) => {
+const BibleVersePanel: React.FC<{ topic: string, verse: string | null, source: 'DB' | 'AI' | null, fetchError: string | null }> = ({ topic, verse, source, fetchError }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
@@ -114,10 +130,19 @@ const BibleVersePanel: React.FC<{ topic: string, verse: string | null }> = ({ to
         onClose={() => setIsModalOpen(false)}
         topic={topic}
         verse={verse}
+        source={source}
+        fetchError={fetchError}
       />
       <div className="w-full sm:w-1/3 flex-shrink-0 sm:h-auto bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center flex-shrink-0">
-          <h2 className="text-lg sm:text-xl font-bold text-slate-100">{topic} 본문</h2>
+            <div className="flex items-baseline gap-3">
+                <h2 className="text-lg sm:text-xl font-bold text-slate-100">{topic} 본문</h2>
+                {source && (
+                    <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${source === 'DB' ? 'bg-green-600 text-green-100' : 'bg-yellow-600 text-yellow-100'}`}>
+                        {source}
+                    </span>
+                )}
+            </div>
           <button
             onClick={() => setIsModalOpen(true)}
             disabled={!verse}
@@ -127,11 +152,17 @@ const BibleVersePanel: React.FC<{ topic: string, verse: string | null }> = ({ to
           </button>
         </div>
         <div className="hidden sm:block p-4 sm:p-6 overflow-y-auto h-full">
-          {verse ? (
-            <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{verse}</p>
-          ) : (
-            <p className="text-slate-400">성경 본문을 불러오는 중입니다...</p>
-          )}
+            {fetchError && (
+                <div className="mb-4 p-3 bg-yellow-900/50 border border-yellow-700 rounded-lg text-sm text-yellow-300">
+                    <p className="font-bold mb-1">DB 불러오기 실패</p>
+                    <p>{fetchError}</p>
+                </div>
+            )}
+            {verse ? (
+                <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{verse}</p>
+            ) : (
+                 !fetchError && <p className="text-slate-400">성경 본문을 불러오는 중입니다...</p>
+            )}
         </div>
       </div>
     </>
@@ -223,7 +254,11 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const [userInput, setUserInput] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>(savedSession.messages || []);
   const [error, setError] = useState<string | null>(null);
+  
   const [bibleVerse, setBibleVerse] = useState<string | null>(savedSession.bibleVerse);
+  const [bibleVerseSource, setBibleVerseSource] = useState<'DB' | 'AI' | null>(savedSession.bibleVerse ? 'DB' : null);
+  const [verseFetchError, setVerseFetchError] = useState<string | null>(null);
+
   const [decryptedApiKey, setDecryptedApiKey] = useState<string | undefined>(undefined);
 
   const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
@@ -403,7 +438,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
   result.cleanedText = cleanedText;
   return result;
-}, []); 
+}, [bibleVerse]); 
 
   const sendMessage = useCallback(async (messageContent: string) => {
     if (!messageContent.trim() || isLoading) return;
@@ -443,9 +478,6 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         setMessages(prev => [...prev, { role: 'model', content: processed.cleanedText }]);
       }
   
-      if (processed.verseExtracted) {
-        setBibleVerse(prevVerse => prevVerse || processed.verseExtracted);
-      }
       if (processed.quizStarted) setQuizData(processed.quizStarted);
       if (processed.isComplete) setIsCompleted(true);
   
@@ -490,9 +522,25 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
       setIsLoading(true);
       setError(null);
-      let plainApiKey: string | undefined = encryptedApiKey;
 
       try {
+        // --- BIBLE VERSE FETCH LOGIC ---
+        let verseText = savedSession.bibleVerse;
+        let dbError: string | null = null;
+        
+        // If pre-fetch from App.tsx failed, try again to get the error message for display.
+        if (!verseText) {
+            const result = await getBibleVerse(topic);
+            if (result.text) {
+                verseText = result.text;
+            }
+            // Store the error message to show the user why the fallback is used.
+            dbError = result.error; 
+        }
+        setVerseFetchError(dbError);
+
+        // --- AI CONVERSATION START ---
+        let plainApiKey: string | undefined = encryptedApiKey;
         if (plainApiKey && aiModel === 'perplexity') {
             const session = await supabase.auth.getSession();
             if (!session.data.session?.access_token) {
@@ -520,9 +568,16 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
             setMessages([{ role: 'model', content: processed.cleanedText }]);
         }
 
-        if (processed.verseExtracted) {
+        // --- FINAL BIBLE VERSE STATE SETTING ---
+        // Prioritize verse from DB. If it failed, use AI's as fallback.
+        if (verseText) {
+            setBibleVerse(verseText);
+            setBibleVerseSource('DB');
+        } else if (processed.verseExtracted) {
             setBibleVerse(processed.verseExtracted);
+            setBibleVerseSource('AI');
         }
+        // If both fail, verse remains null and the error is displayed.
 
       } catch (err) {
         setError(err instanceof Error ? err.message : '대화를 시작하는 중 알 수 없는 오류가 발생했습니다.');
@@ -679,7 +734,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       </div>
     ) : (
       <div className="w-full h-[95vh] max-w-7xl mx-auto p-2 sm:p-6 flex flex-col sm:flex-row gap-6">
-        <BibleVersePanel topic={topic} verse={bibleVerse} />
+        <BibleVersePanel topic={topic} verse={bibleVerse} source={bibleVerseSource} fetchError={verseFetchError} />
         <div className="flex-1 flex flex-col bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 overflow-hidden">
           <div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center flex-shrink-0 gap-4">
             <div className="flex-1 min-w-0">
