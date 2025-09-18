@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { startLearningConversation as startGeminiConversation, continueLearningConversation as continueGeminiConversation } from '../services/geminiService';
-import { startLearningConversation as startPerplexityConversation, continueLearningConversation as continuePerplexityConversation } from '../services/perplexityService';
-import { startLearningConversation as startChatGptConversation, continueLearningConversation as continueChatGptConversation } from '../services/chatgptService';
+import { continueLearningConversation as continueGeminiConversation } from '../services/geminiService';
+import { continueLearningConversation as continuePerplexityConversation } from '../services/perplexityService';
+import { continueLearningConversation as continueChatGptConversation } from '../services/chatgptService';
 import { LearningStep } from '../constants';
 import type { Quiz, ChatMessage, LearningSessionState, AiModel } from '../types';
 import { QuestionType } from '../types';
@@ -44,8 +44,9 @@ const LoadingDots: React.FC = () => (
   </div>
 );
 
-const ProgressTracker: React.FC<{ currentStep: LearningStep }> = ({ currentStep }) => {
-  const steps = Object.values(LearningStep);
+const ProgressTracker: React.FC<{ currentStep: LearningStep, mode: 'general' | 'advanced' }> = ({ currentStep, mode }) => {
+  const allSteps = Object.values(LearningStep);
+  const steps = mode === 'general' ? allSteps.slice(0, 4) : allSteps.slice(4);
   const currentIndex = steps.indexOf(currentStep);
 
   return (
@@ -64,6 +65,7 @@ const ProgressTracker: React.FC<{ currentStep: LearningStep }> = ({ currentStep 
     </div>
   );
 };
+
 
 const BibleVerseModal: React.FC<{
   isOpen: boolean;
@@ -174,10 +176,12 @@ const StepControl: React.FC<{
   onStepSelect: (step: LearningStep) => void;
   currentStep: LearningStep;
   isLoading: boolean;
-}> = ({ onStepSelect, currentStep, isLoading }) => {
+  mode: 'general' | 'advanced';
+}> = ({ onStepSelect, currentStep, isLoading, mode }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const steps = Object.values(LearningStep);
+  const allSteps = Object.values(LearningStep);
+  const steps = mode === 'general' ? allSteps.slice(0, 4) : allSteps.slice(4);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -244,10 +248,99 @@ const StepControl: React.FC<{
   );
 };
 
+// ---------------- Helper Functions ----------------
+
+// AI에게 보내는 프롬프트에 현재 학습 중인 성경 본문 컨텍스트를 강제로 주입합니다.
+const constructEnforcedPrompt = (userMessage: string, topic: string, bibleVerse: string | null): string => {
+  if (!bibleVerse) {
+    // 본문이 아직 로드되지 않은 경우, 원본 메시지를 그대로 반환합니다.
+    return userMessage;
+  }
+  return `
+매우 중요한 규칙: 당신의 모든 답변, 질문, 퀴즈는 반드시 아래 제공된 성경 본문에만 근거해야 합니다.
+다른 어떤 성경 구절도 절대로 참조하거나 인용해서는 안 됩니다. 이 규칙을 어기면 안 됩니다.
+
+[현재 학습 본문: ${topic}]
+---
+${bibleVerse}
+---
+
+이제 위의 규칙과 본문을 바탕으로 사용자의 다음 요청에 응답하세요:
+"${userMessage}"
+`.trim();
+};
+
+// 문자열 비교를 위해 공백과 구두점을 제거하고 소문자로 변환합니다.
+const normalizeText = (text: string | null | undefined): string => {
+  if (!text) return '';
+  return text.replace(/[\s.,;:?!'"`“‘”’]/g, '').toLowerCase();
+};
+
+/**
+ * 정답을 확인할 때, 사용자가 조사(예: '을/를', '이/가')를 생략하거나 추가한 경우에도
+ * 정답으로 처리하기 위한 유연한 비교 함수입니다.
+ * @param userAnswer 사용자가 입력한 답변
+ * @param correctAnswer 실제 정답
+ * @returns 정답 여부 (boolean)
+ */
+const isAnswerCorrect = (userAnswer: string, correctAnswer: string): boolean => {
+    const userNorm = normalizeText(userAnswer);
+    const correctNorm = normalizeText(correctAnswer);
+
+    // 1. 완전 일치 (가장 일반적인 경우)
+    if (userNorm === correctNorm) {
+        return true;
+    }
+    
+    // 2. 조사 생략/추가 허용 로직
+    const shorter = userNorm.length < correctNorm.length ? userNorm : correctNorm;
+    const longer = userNorm.length < correctNorm.length ? correctNorm : userNorm;
+
+    // - 짧은 쪽 답변이 너무 짧지 않아야 함 (예: 한 글자짜리 오타 방지)
+    // - 긴 쪽 답변이 짧은 쪽 답변으로 시작해야 함
+    // - 길이 차이가 2 이하이어야 함 (일반적인 한국어 조사 길이)
+    if (shorter.length > 1 && longer.startsWith(shorter) && (longer.length - shorter.length <= 2)) {
+        return true;
+    }
+
+    return false;
+};
+
+interface ParsedReference {
+  book: string;
+  chapter: number;
+  verses: number[];
+}
+
+// "창세기 1:1-5" 와 같은 참조 문자열을 파싱하여 구조화된 객체로 반환합니다.
+function parseRef(reference: string): ParsedReference | null {
+    const match = reference.match(/^([\uAC00-\uD7A3A-Za-z0-9]+)\s+(\d+):(\d+(?:-\d+)?)/);
+    if (!match) return null;
+
+    const book = match[1];
+    const chapter = parseInt(match[2], 10);
+    const versePart = match[3];
+
+    let verses: number[] = [];
+    if (versePart.includes('-')) {
+        const [start, end] = versePart.split('-').map(v => parseInt(v, 10));
+        if (!isNaN(start) && !isNaN(end) && end >= start) {
+            verses = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+        }
+    } else {
+        const v = parseInt(versePart, 10);
+        if (!isNaN(v)) verses = [v];
+    }
+    
+    if (isNaN(chapter) || verses.length === 0) return null;
+
+    return { book, chapter, verses };
+}
+
 
 // ---------------- 메인 컴포넌트 ----------------
 const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip, onSystemBack }) => {
-  const { topic, aiModel, apiKey: encryptedApiKey } = savedSession;
+  const { topic, aiModel, mode, apiKey: encryptedApiKey } = savedSession;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState<LearningStep>(savedSession.currentStep);
   const [isLoading, setIsLoading] = useState(false);
@@ -272,7 +365,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const optionsMenuRef = useRef<HTMLDivElement>(null);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const isMounted = useRef(false);
+  const isInitialized = useRef(false);
   
   // 학습 도중 다른 창으로 이동하면 세션 저장 후 종료
   useEffect(() => {
@@ -339,7 +432,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     cleanedText = cleanedText.replace(verseMatch[0], '').trim();
   }
 
-  const stepMatch = cleanedText.match(/\[NEXT_STEP:(\w+)\]/);
+  const stepMatch = cleanedText.match(/\[NEXT_STEP:([\w_]+)\]/); // Allow underscores
   if (stepMatch && stepMatch[1]) {
     const nextStepKey = stepMatch[1].toUpperCase() as keyof typeof LearningStep;
     const stepValue = LearningStep[nextStepKey];
@@ -350,83 +443,100 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const testMatch = cleanedText.match(/\[START_TEST\]/);
   if (testMatch) {
     cleanedText = cleanedText.replace(testMatch[0], '').trim();
+    let quizJsonString = ''; // Declare here to be accessible in catch block
     try {
       const jsonStartIndex = cleanedText.search(/[{\[]/);
       if (jsonStartIndex !== -1) {
-        const quizJsonString = cleanedText.substring(jsonStartIndex);
+        let rawJsonString = cleanedText.substring(jsonStartIndex);
+        
+        const lastBracket = rawJsonString.lastIndexOf(']');
+        const lastBrace = rawJsonString.lastIndexOf('}');
+        const jsonEndIndex = Math.max(lastBracket, lastBrace);
+        
+        if (jsonEndIndex > -1) {
+            quizJsonString = rawJsonString.substring(0, jsonEndIndex + 1);
+        } else {
+            quizJsonString = rawJsonString;
+        }
+
         const parsedQuiz = JSON.parse(quizJsonString) as Quiz;
 
         if (parsedQuiz && parsedQuiz.questions) {
+          const originalQuestionCount = parsedQuiz.questions.length;
+          console.log(`[Quiz Processing] AI generated ${originalQuestionCount} questions.`);
+          
           parsedQuiz.questions.forEach(q => {
             if (q.type === QuestionType.FILL_IN_THE_BLANK) {
               const question = q as import('../types').FillInTheBlankQuestion;
-
-              // --- 🔥 verseTextParts 보정 로직 ---
               if (question.verseTextParts.length === 1) {
                 const fullVerse = question.verseTextParts[0];
-                const parts = fullVerse
-                  .split(/(___|__)/g)
-                  .map(p => (p === '__' || p === '___' ? '___' : p))
-                  .filter(p => p && p.length > 0);
+                const parts = fullVerse.split(/(___|__)/g).map(p => (p === '__' || p === '___' ? '___' : p)).filter(p => p && p.length > 0);
                 question.verseTextParts = parts;
               }
-
               const existingBlanks = question.verseTextParts.filter(p => p === '___').length;
               if (existingBlanks !== question.answers.length) {
                 const fullVerse = question.verseTextParts.join('');
-                const parts = fullVerse
-                  .split(/(___|__)/g)
-                  .map(p => (p === '__' || p === '___' ? '___' : p))
-                  .filter(p => p && p.length > 0);
-
+                const parts = fullVerse.split(/(___|__)/g).map(p => (p === '__' || p === '___' ? '___' : p)).filter(p => p && p.length > 0);
                 const newBlankCount = parts.filter(p => p === '___').length;
                 if (newBlankCount === question.answers.length) {
                   question.verseTextParts = parts;
                 } else {
-                  console.warn("❗ FILL_IN_THE_BLANK 보정 실패", {
-                    original: question.verseTextParts,
-                    reconstructed: parts,
-                    answers: question.answers,
-                  });
-
-                  // answers 개수만큼 강제로 blanks 삽입
+                  console.warn("❗ FILL_IN_THE_BLANK 보정 실패", { original: question.verseTextParts, reconstructed: parts, answers: question.answers });
                   question.verseTextParts = [fullVerse, ...Array(question.answers.length).fill('___')];
                 }
               }
             }
           });
-          // --- ✅ 추가: bibleVerse 검증 로직 (암송 & 시험 공통) --- 250915
+          
           if (bibleVerse) {
-            parsedQuiz.questions = parsedQuiz.questions.filter(q => {
-              if (q.type === QuestionType.FILL_IN_THE_BLANK) {
-                const verseString = q.verseTextParts.join('');
-                if (!bibleVerse.includes(verseString.replace(/___/g, ''))) {
-                  console.warn("❗ Quiz verse mismatch detected (FILL_IN_THE_BLANK)", {
-                    expected: bibleVerse,
-                    got: verseString
+              const sessionRef = parseRef(topic);
+              if (!sessionRef) {
+                  console.warn("❗ 세션 주제 파싱 실패:", topic);
+              } else {
+                  const questionsBeforeFilter = parsedQuiz.questions.length;
+                  parsedQuiz.questions = parsedQuiz.questions.filter(q => {
+                      const questionRef = parseRef(q.verseReference);
+                      if (!questionRef) {
+                          console.warn("❗ 퀴즈 구절 참조 파싱 실패:", q.verseReference);
+                          return false;
+                      }
+
+                      if (sessionRef.book !== questionRef.book) {
+                          console.warn("❗ 퀴즈 책 불일치", { expected: sessionRef.book, got: questionRef.book });
+                          return false;
+                      }
+                      if (sessionRef.chapter !== questionRef.chapter) {
+                          console.warn("❗ 퀴즈 장 불일치", { expected: sessionRef.chapter, got: questionRef.chapter });
+                          return false;
+                      }
+                      const isVerseSubset = questionRef.verses.every(v => sessionRef.verses.includes(v));
+                      if (!isVerseSubset) {
+                          console.warn("❗ 퀴즈 절 번호 불일치", { session: sessionRef.verses, question: questionRef.verses });
+                          return false;
+                      }
+
+                      if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+                          const verseString = q.verseTextParts.join('').replace(/___/g, '');
+                          if (!normalizeText(bibleVerse).includes(normalizeText(verseString))) {
+                              console.warn("❗ 퀴즈 내용 불일치 (빈칸 채우기)", { expected: normalizeText(bibleVerse), got: normalizeText(verseString) });
+                              return false;
+                          }
+                      }
+                      return true;
                   });
-                  return false; // ❌ 엉뚱한 구절은 제외
-                }
+                  const questionsAfterFilter = parsedQuiz.questions.length;
+                  console.log(`[Quiz Filtering] Before: ${questionsBeforeFilter}, After: ${questionsAfterFilter}`);
               }
-              if (q.type === QuestionType.QUESTION_ANSWER) {
-                if (!bibleVerse.includes(q.verseReference)) {
-                  console.warn("❗ Quiz verse mismatch detected (QUESTION_ANSWER)", {
-                    expected: bibleVerse,
-                    got: q.verseReference
-                  });
-                  return false; // ❌ 엉뚱한 구절은 제외
-                }
-              }
-              return true;
-            });
           }
         }         
 
         result.quizStarted = parsedQuiz;
         cleanedText = cleanedText.substring(0, jsonStartIndex).trim();
       }
-    } catch {
-      setError("퀴즈 데이터를 처리하는 중 오류가 발생했습니다.");
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      const detailedError = `퀴즈 데이터를 처리하는 중 오류가 발생했습니다. AI가 반환한 JSON 형식이 잘못되었을 가능성이 높습니다.\n\n오류: ${err}\n\nAI 응답:\n${quizJsonString}`;
+      setError(detailedError);
     }
   }
 
@@ -438,57 +548,60 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
   result.cleanedText = cleanedText;
   return result;
-}, [bibleVerse]); 
+}, [bibleVerse, topic]); 
 
   const sendMessage = useCallback(async (messageContent: string) => {
     if (!messageContent.trim() || isLoading) return;
-  
+
+    // The user-facing message is clean. It's stored in UI state and history.
     const newUserMessage: ChatMessage = { role: 'user', content: messageContent };
-    
-    // Optimistically update the UI with the user's message.
     setMessages(prev => [...prev, newUserMessage]);
-  
     setIsLoading(true);
     setError(null);
   
-    // The history for the API should include the new user message.
-    const historyForApi = [...chatHistory, newUserMessage];
-  
     try {
-      let responseText: string;
-      if (aiModel === 'perplexity' && decryptedApiKey) {
-        responseText = await continuePerplexityConversation(historyForApi.slice(0, -1), messageContent, decryptedApiKey);
-      } else if (aiModel === 'chatgpt') {
-        responseText = await continueChatGptConversation(historyForApi.slice(0, -1), messageContent);
-      } else {
-        responseText = await continueGeminiConversation(historyForApi.slice(0, -1), messageContent);
-      }
+        // The API-facing message is enforced with context just before sending.
+        const finalApiMessage = constructEnforcedPrompt(messageContent, topic, bibleVerse);
+        let responseText: string;
+        
+        // Pass topic and mode to ensure system instruction is correct every time.
+        if (aiModel === 'perplexity' && decryptedApiKey) {
+            responseText = await continuePerplexityConversation(chatHistory, finalApiMessage, topic, mode, decryptedApiKey);
+        } else if (aiModel === 'chatgpt') {
+            responseText = await continueChatGptConversation(chatHistory, finalApiMessage, topic, mode);
+        } else {
+            responseText = await continueGeminiConversation(chatHistory, finalApiMessage, topic, mode);
+        }
+
+        const newModelMessage: ChatMessage = { role: 'model', content: responseText }; // Raw response
+        const processed = processAIResponse(responseText);
   
-      const newModelMessage: ChatMessage = { role: 'model', content: responseText };
-      const processed = processAIResponse(responseText);
-  
-      if (processed.stepChangedTo) {
-        setCurrentStep(processed.stepChangedTo);
-        // On step change, reset history and UI for a clean start into the new phase.
-        setChatHistory([newUserMessage, newModelMessage]);
-        setMessages([newUserMessage, { role: 'model', content: processed.cleanedText }]);
-      } else {
-        // Otherwise, append the new model message to the existing history.
-        setChatHistory(prev => [...prev, newUserMessage, newModelMessage]);
+        // Store the clean user message and the raw model message in history.
+        const newHistory = [...chatHistory, newUserMessage, newModelMessage];
+        setChatHistory(newHistory);
+        
+        // Display the processed model message in the UI.
         setMessages(prev => [...prev, { role: 'model', content: processed.cleanedText }]);
-      }
   
-      if (processed.quizStarted) setQuizData(processed.quizStarted);
-      if (processed.isComplete) setIsCompleted(true);
+        if (processed.stepChangedTo) setCurrentStep(processed.stepChangedTo);
+        if (processed.quizStarted) {
+            // AI가 생성한 퀴즈에 유효한 문제가 하나도 없으면 사용자에게 알립니다.
+            if (processed.quizStarted.questions.length === 0) {
+                const feedbackMsg = "AI가 생성한 퀴즈에 유효한 문제가 없어 대화로 돌아갑니다. 다시 시도해주세요.";
+                setMessages(prev => [...prev, { role: 'model', content: feedbackMsg }]);
+            } else {
+                setQuizData(processed.quizStarted);
+            }
+        }
+        if (processed.isComplete) setIsCompleted(true);
   
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 오류');
-      // On error, roll back the optimistic UI update.
-      setMessages(prev => prev.slice(0, -1));
+      setMessages(prev => prev.slice(0, -1)); // Remove the user message that failed
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, chatHistory, aiModel, decryptedApiKey, processAIResponse]);
+  }, [isLoading, chatHistory, aiModel, decryptedApiKey, processAIResponse, topic, bibleVerse, mode]);
   
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -502,93 +615,94 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   };
   
   const handleAdvanceStepRequest = () => {
-    const message = "준비되었습니다. 다음 단계로 넘어가 주세요.";
+    const isTestStep = currentStep === LearningStep.MEMORIZE_AND_TEST || currentStep === LearningStep.TEST;
+    const isPreTestStep = 
+      (mode === 'general' && currentStep === LearningStep.APPLICATION) ||
+      (mode === 'advanced' && currentStep === LearningStep.MEMORIZATION);
+
+    let message = "준비되었습니다. 다음 단계로 넘어가 주세요.";
+
+    if ((isPreTestStep || isTestStep) && !quizData) {
+        if (bibleVerse) {
+            message = `이전 단계 학습이 완료되었습니다. 이제 시험을 시작하겠습니다. 시스템 지침에 따라 '${topic}' 본문에 대한 퀴즈 JSON을 생성해주세요.
+
+퀴즈의 모든 내용은 반드시 아래 제공된 성경 본문만을 사용하여 생성해야 합니다. 다른 구절을 참조하면 생성된 퀴즈가 거부됩니다.
+
+[퀴즈 출제용 본문: ${topic}]
+---
+${bibleVerse}
+---
+`;
+        } else {
+            message = `이전 단계 학습이 완료되었습니다. 이제 시험을 시작하겠습니다. 시스템 지침에 따라 '${topic}' 본문에 대한 퀴즈 JSON을 생성해주세요.`;
+        }
+    }
+    
     sendMessage(message);
   };
 
-  useEffect(() => {
-    const initializeConversation = async () => {
-      if (chatHistory && chatHistory.length > 0) {
-        const cleanedMessages = chatHistory.map(msg => {
-            if (msg.role === 'model') {
-                return { ...msg, content: processAIResponse(msg.content).cleanedText };
+    // Effect for setting up the session (fetching verse, decrypting key)
+    useEffect(() => {
+        const setupSession = async () => {
+            setIsLoading(true);
+            setError(null);
+    
+            try {
+                // Fetch verse if not already in session state
+                if (!savedSession.bibleVerse) {
+                    const result = await getBibleVerse(topic);
+                    if (result.text) {
+                        setBibleVerse(result.text);
+                        setBibleVerseSource('DB');
+                    }
+                    setVerseFetchError(result.error);
+                }
+    
+                // Decrypt API key if needed
+                if (encryptedApiKey && aiModel === 'perplexity') {
+                    const session = await supabase.auth.getSession();
+                    if (!session.data.session?.access_token) {
+                        throw new Error("API 키를 복호화하기 위한 인증 토큰을 찾을 수 없습니다.");
+                    }
+                    const plainApiKey = await decrypt(encryptedApiKey, session.data.session.access_token);
+                    setDecryptedApiKey(plainApiKey);
+                }
+    
+                // If there's existing chat history, restore it
+                if (savedSession.messages && savedSession.messages.length > 0) {
+                    const cleanedMessages = savedSession.messages.map(msg => {
+                        if (msg.role === 'model') {
+                            return { ...msg, content: processAIResponse(msg.content).cleanedText };
+                        }
+                        // User messages are now stored clean, so return as is.
+                        return msg;
+                    });
+                    setMessages(cleanedMessages);
+                }
+            } catch (err) {
+                setError(err instanceof Error ? err.message : '세션 설정 중 오류가 발생했습니다.');
+            } finally {
+                setIsLoading(false);
             }
-            return msg;
-        });
-        setMessages(cleanedMessages);
-        isMounted.current = true;
-        return;
-      }
+        };
+    
+        setupSession();
+    }, []); // Run only on initial mount
+    
+    // Effect for starting the conversation once setup is complete
+    useEffect(() => {
+        // Conditions to start a new conversation:
+        // 1. Not currently loading.
+        // 2. Conversation has not been started yet (isInitialized ref).
+        // 3. There is no existing chat history.
+        // 4. We have the bible verse (or there was an error, we proceed anyway).
+        const canStart = !isLoading && !isInitialized.current && chatHistory.length === 0 && (bibleVerse || verseFetchError);
 
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        // --- BIBLE VERSE FETCH LOGIC ---
-        let verseText = savedSession.bibleVerse;
-        let dbError: string | null = null;
-        
-        // If pre-fetch from App.tsx failed, try again to get the error message for display.
-        if (!verseText) {
-            const result = await getBibleVerse(topic);
-            if (result.text) {
-                verseText = result.text;
-            }
-            // Store the error message to show the user why the fallback is used.
-            dbError = result.error; 
+        if (canStart) {
+            isInitialized.current = true; // Mark as initialized to prevent re-triggering
+            sendMessage("학습을 시작해주세요.");
         }
-        setVerseFetchError(dbError);
-
-        // --- AI CONVERSATION START ---
-        let plainApiKey: string | undefined = encryptedApiKey;
-        if (plainApiKey && aiModel === 'perplexity') {
-            const session = await supabase.auth.getSession();
-            if (!session.data.session?.access_token) {
-                throw new Error("API 키를 복호화하기 위한 인증 토큰을 찾을 수 없습니다.");
-            }
-            plainApiKey = await decrypt(plainApiKey, session.data.session.access_token);
-            setDecryptedApiKey(plainApiKey);
-        }
-
-        let initialResponse: { history: ChatMessage[]; initialMessage?: string };
-
-        if (aiModel === 'perplexity' && plainApiKey) {
-            initialResponse = await startPerplexityConversation(topic, plainApiKey);
-        } else if (aiModel === 'chatgpt') {
-            initialResponse = await startChatGptConversation(topic);
-        } else {
-            initialResponse = await startGeminiConversation(topic);
-        }
-
-        const processed = processAIResponse(initialResponse.initialMessage || '');
-        
-        setChatHistory(initialResponse.history);
-        
-        if (processed.cleanedText) {
-            setMessages([{ role: 'model', content: processed.cleanedText }]);
-        }
-
-        // --- FINAL BIBLE VERSE STATE SETTING ---
-        // Prioritize verse from DB. If it failed, use AI's as fallback.
-        if (verseText) {
-            setBibleVerse(verseText);
-            setBibleVerseSource('DB');
-        } else if (processed.verseExtracted) {
-            setBibleVerse(processed.verseExtracted);
-            setBibleVerseSource('AI');
-        }
-        // If both fail, verse remains null and the error is displayed.
-
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '대화를 시작하는 중 알 수 없는 오류가 발생했습니다.');
-      } finally {
-        setIsLoading(false);
-        setTimeout(() => { isMounted.current = true; }, 500);
-      }
-    };
-
-    initializeConversation();
-  }, []); 
+    }, [isLoading, chatHistory, bibleVerse, verseFetchError, sendMessage]);
   
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -597,11 +711,12 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   }, [messages]);
 
   useEffect(() => {
-    if (!isMounted.current) return;
+    if (!isInitialized.current && chatHistory.length === 0) return;
 
     const newState: LearningSessionState = {
       topic: topic,
       aiModel: aiModel,
+      mode: mode,
       apiKey: encryptedApiKey,
       messages: chatHistory,
       currentStep,
@@ -613,7 +728,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     };
 
     onStateChange(newState);
-  }, [chatHistory, currentStep, bibleVerse, quizData, currentQuestionIndex, score, isCompleted, onStateChange, topic, aiModel, encryptedApiKey]);
+  }, [chatHistory, currentStep, bibleVerse, quizData, currentQuestionIndex, score, isCompleted, onStateChange, topic, aiModel, mode, encryptedApiKey]);
   
   const handleQuizSubmit = (userAnswers: string[]): boolean => {
     const currentQuestion = quizData?.questions[currentQuestionIndex];
@@ -621,19 +736,17 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
     let isCorrect = false;
     if (currentQuestion.type === QuestionType.FILL_IN_THE_BLANK) {
-        // To be correct, number of answers must match and not be zero.
         if (userAnswers.length !== currentQuestion.answers.length || currentQuestion.answers.length === 0) {
             return false;
         }
         isCorrect = userAnswers.every((ans, i) => 
-            ans.trim().toLowerCase() === currentQuestion.answers[i].trim().toLowerCase()
+            isAnswerCorrect(ans, currentQuestion.answers[i])
         );
     } else if (currentQuestion.type === QuestionType.QUESTION_ANSWER) {
-        // To be correct, there must be one answer.
         if (userAnswers.length !== 1) {
             return false;
         }
-        isCorrect = userAnswers[0].trim().toLowerCase() === currentQuestion.answer.trim().toLowerCase();
+        isCorrect = isAnswerCorrect(userAnswers[0], currentQuestion.answer);
     }
 
     if (isCorrect) {
@@ -648,10 +761,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     } else {
       const finalScore = score;
       const totalQuestions = quizData?.questions.length || 0;
-      const systemMessage = `[SYSTEM] Test finished. Score: ${finalScore}/${totalQuestions}. Please provide the final completion message.`;
-      
-      setQuizData(null); // Return to chat view
-      sendMessage(systemMessage);
+      onFinish(finalScore, totalQuestions);
     }
   };
 
@@ -661,7 +771,8 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
   const StepSelectionModal: React.FC = () => {
     if (!isStepModalOpen) return null;
-    const steps = Object.values(LearningStep);
+    const allSteps = Object.values(LearningStep);
+    const steps = mode === 'general' ? allSteps.slice(0, 4) : allSteps.slice(4);
 
     return (
       <div 
@@ -705,9 +816,9 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   // ---------------- Render ----------------
   if (error) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center text-center p-4">
+      <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 flex flex-col items-center justify-center text-center bg-slate-800/50 rounded-2xl shadow-inner border border-red-700">
         <h2 className="text-2xl font-bold text-red-400 mb-4">대화 중 오류 발생</h2>
-        <p className="text-slate-300 max-w-md mb-6">{error}</p>
+        <pre className="text-slate-300 text-left bg-slate-900/50 p-4 rounded-md font-mono text-sm mb-6 whitespace-pre-wrap w-full">{error}</pre>
         <button
           onClick={onBack}
           className="px-6 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors"
@@ -717,20 +828,39 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       </div>
     );
   }
+  
+  const currentQuestion = quizData?.questions?.[currentQuestionIndex];
 
   return (
     <>
     <StepSelectionModal />
     {quizData ? (
       <div className="w-full max-w-7xl mx-auto p-2 sm:p-6 flex items-center justify-center">
-        <QuizCard
-          question={quizData.questions[currentQuestionIndex]}
-          questionNumber={currentQuestionIndex + 1}
-          totalQuestions={quizData.questions.length}
-          onSubmit={handleQuizSubmit}
-          onNext={handleQuizNext}
-          onSkip={handleQuizSkip}
-        />
+        {currentQuestion ? (
+            <QuizCard
+              question={currentQuestion}
+              questionNumber={currentQuestionIndex + 1}
+              totalQuestions={quizData.questions.length}
+              onSubmit={handleQuizSubmit}
+              onNext={handleQuizNext}
+              onSkip={handleQuizSkip}
+            />
+        ) : (
+            <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 flex flex-col items-center justify-center text-center bg-slate-800/50 rounded-2xl shadow-inner border border-red-700">
+                <h2 className="text-2xl font-bold text-red-400 mb-4">퀴즈 표시 오류</h2>
+                <p className="text-slate-300 mb-6">
+                    AI가 퀴즈를 생성했지만 표시할 유효한 문제가 없습니다.
+                    <br />
+                    이는 보통 AI가 생성한 문제가 현재 학습 중인 성경 구절과 일치하지 않아 모두 필터링되었을 때 발생합니다.
+                </p>
+                <button
+                    onClick={() => setQuizData(null)}
+                    className="px-6 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors"
+                >
+                    대화로 돌아가기
+                </button>
+            </div>
+        )}
       </div>
     ) : (
       <div className="w-full h-[95vh] max-w-7xl mx-auto p-2 sm:p-6 flex flex-col sm:flex-row gap-6">
@@ -740,13 +870,13 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
             <div className="flex-1 min-w-0">
                 <h2 className="text-xl font-bold text-slate-100 truncate" title={topic}>{topic}</h2>
                 <p className="text-xs text-blue-400 mt-1">
-                    AI 모델: {AI_MODEL_DISPLAY_NAMES[aiModel]}
+                    AI 모델: {AI_MODEL_DISPLAY_NAMES[aiModel]} ({mode === 'general' ? '일반 학습' : '심화 학습'})
                 </p>
             </div>
             
             {/* --- Desktop Buttons --- */}
             <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
-                <StepControl onStepSelect={handleForceStepChange} currentStep={currentStep} isLoading={isLoading} />
+                <StepControl onStepSelect={handleForceStepChange} currentStep={currentStep} isLoading={isLoading} mode={mode} />
                 <button
                   onClick={handleAdvanceStepRequest}
                   disabled={isLoading}
@@ -814,7 +944,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
             </div>
           </div>
           <div className="p-4 sm:px-6 sm:py-4 border-b border-slate-700">
-            <ProgressTracker currentStep={currentStep} />
+            <ProgressTracker currentStep={currentStep} mode={mode}/>
           </div>
           <div ref={chatContainerRef} className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-6">
             {messages.map((msg, index) => (
@@ -836,7 +966,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
           {isCompleted ? (
             <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
                 <button
-                    onClick={() => onFinish(score, quizData?.questions.length || 5)}
+                    onClick={() => onFinish(score, quizData?.questions.length || 0)}
                     className="w-full px-5 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-500 transition-colors text-lg"
                 >
                     학습 완료

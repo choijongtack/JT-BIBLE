@@ -40,6 +40,7 @@ export interface LearningSessionState {
   currentStep: LearningStep;
   messages: ChatMessage[];
   aiModel: AiModel;
+  mode: 'general' | 'advanced';
   apiKey?: string; // Only used for Perplexity model now
   bibleVerse: string | null;
   score: number;

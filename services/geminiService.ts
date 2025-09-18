@@ -89,46 +89,14 @@ export const getNextStudyTopic = async (currentTopic: string): Promise<string> =
     }
 };
 
-export const startLearningConversation = async (topic: string, history: ChatMessage[] = []): Promise<{ history: ChatMessage[]; initialMessage?: string }> => {
+export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string, topic: string, mode: 'general' | 'advanced'): Promise<string> => {
     try {
-        if (history.length > 0) {
-            return { history };
-        }
-
-        const systemInstruction = buildSystemInstruction(topic);
-        const initialUserMessage: ChatMessage = { role: 'user', content: "학습을 시작해주세요." };
-
-        const payload = {
-            contents: toGeminiHistory([initialUserMessage]),
-            systemInstruction: { // The Gemini REST API uses 'systemInstruction' (camelCase).
-                parts: [{ text: systemInstruction }]
-            }
-        };
-
-        const initialMessage = await callGeminiProxy(payload);
-        const newHistory: ChatMessage[] = [
-            initialUserMessage,
-            { role: 'model', content: initialMessage }
-        ];
-
-        return { history: newHistory, initialMessage };
-
-    } catch (error) {
-        console.error("Error starting conversation with Gemini:", error);
-        const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
-        throw new Error(`대화를 시작하지 못했습니다: ${errorMessage}`);
-    }
-};
-
-export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string): Promise<string> => {
-    try {
-        // Topic is implicitly part of the system instruction from the start of the conversation.
-        const systemInstruction = buildSystemInstruction('');
+        const systemInstruction = buildSystemInstruction(topic, mode);
         const newUserMessage: ChatMessage = { role: 'user', content: message };
         
         const payload = {
             contents: toGeminiHistory([...currentHistory, newUserMessage]),
-            systemInstruction: { // The Gemini REST API uses 'systemInstruction' (camelCase).
+            systemInstruction: {
                 parts: [{ text: systemInstruction }]
             }
         };

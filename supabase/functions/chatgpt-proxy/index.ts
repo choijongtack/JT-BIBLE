@@ -151,6 +151,24 @@ serve(async (req) => {
         },
         body: JSON.stringify(completionPayload)
       });
+      
+      if (!response.ok) {
+        let errorBody;
+        try {
+          errorBody = await response.json();
+        } catch {
+          errorBody = await response.text();
+        }
+        console.error(`[ChatGPT Proxy] OpenAI API Error (${response.status}):`, errorBody);
+        const errorMessage = typeof errorBody === 'string'
+          ? errorBody
+          : (errorBody?.error?.message || 'OpenAI API request failed');
+
+        return new Response(JSON.stringify({ error: { message: errorMessage } }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: response.status,
+        });
+      }
 
       const data = await response.json();
       return new Response(JSON.stringify(data), {

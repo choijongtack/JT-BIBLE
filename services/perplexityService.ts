@@ -136,48 +136,9 @@ const buildHistory = (systemInstruction: string, existingMessages: ChatMessage[]
     return history;
 }
 
-export const startLearningConversation = async (topic: string, apiKey: string, history: ChatMessage[] = []): Promise<{ history: ChatMessage[]; initialMessage?: string }> => {
+export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string, topic: string, mode: 'general' | 'advanced', apiKey: string): Promise<string> => {
     try {
-        if (history.length > 0) {
-            return { history };
-        }
-
-        const systemInstruction = buildSystemInstruction(topic);
-        const messages = buildHistory(systemInstruction, []);
-        messages.push({ role: 'user', content: '학습을 시작해주세요.' });
-
-        const payload = {
-            apiKey,
-            endpoint: API_ENDPOINT,
-            payload: { model: PPLX_MODEL, messages }
-        };
-        const { data, error: functionError } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-            body: { payload }
-        });
-
-        if (functionError || data.error || data.detail) {
-            const { error } = handleProxyError(functionError, data, 'start conversation');
-            throw new Error(error);
-        }
-        
-        const initialMessage = data.choices[0].message.content;
-        
-        const newHistory: ChatMessage[] = [
-            { role: 'user', content: '학습을 시작해주세요.' },
-            { role: 'model', content: initialMessage }
-        ];
-
-        return { history: newHistory, initialMessage };
-    } catch (error) {
-        console.error("Error starting conversation with Perplexity:", error);
-        const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
-        throw new Error(`대화를 시작하지 못했습니다: ${errorMessage}`);
-    }
-};
-
-export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string, apiKey: string): Promise<string> => {
-    try {
-        const systemInstruction = buildSystemInstruction(''); // Topic is baked into history, so not critical here.
+        const systemInstruction = buildSystemInstruction(topic, mode);
         const messages = buildHistory(systemInstruction, currentHistory);
         messages.push({ role: 'user', content: message });
         

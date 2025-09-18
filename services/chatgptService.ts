@@ -152,36 +152,9 @@ const buildHistory = (systemInstruction: string, existingMessages: ChatMessage[]
     return history;
 }
 
-export const startLearningConversation = async (topic: string, history: ChatMessage[] = []): Promise<{ history: ChatMessage[]; initialMessage?: string }> => {
+export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string, topic: string, mode: 'general' | 'advanced'): Promise<string> => {
     try {
-        if (history.length > 0) {
-            return { history };
-        }
-
-        const systemInstruction = buildSystemInstruction(topic);
-        const messages = buildHistory(systemInstruction, []);
-        messages.push({ role: 'user', content: '학습을 시작해주세요.' });
-
-        const data = await callChatGptCompletion({ model: GPT_MODEL, messages });
-        
-        const initialMessage = data.choices[0].message.content;
-        
-        const newHistory: ChatMessage[] = [
-            { role: 'user', content: '학습을 시작해주세요.' },
-            { role: 'model', content: initialMessage }
-        ];
-
-        return { history: newHistory, initialMessage };
-    } catch (error) {
-        console.error("Error starting conversation with ChatGPT:", error);
-        const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
-        throw new Error(`대화를 시작하지 못했습니다: ${errorMessage}`);
-    }
-};
-
-export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string): Promise<string> => {
-    try {
-        const systemInstruction = buildSystemInstruction(''); // Topic is baked into history, so not critical here.
+        const systemInstruction = buildSystemInstruction(topic, mode);
         const messages = buildHistory(systemInstruction, currentHistory);
         messages.push({ role: 'user', content: message });
         

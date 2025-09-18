@@ -15,12 +15,22 @@ export const NEW_TESTAMENT_BOOKS = [
   '야고보서', '베드로전서', '베드로후서', '요한1서', '요한2서', '요한3서', '유다서', '요한계시록'
 ];
 
+// constants.ts
+
 export enum LearningStep {
+  // 일반 모드
+  OBSERVATION = '관찰',
+  INTERPRETATION = '해석',
+  APPLICATION = '적용',
+  MEMORIZE_AND_TEST = '암송/시험',
+
+  // 심화(고시) 모드
   ANALYSIS = '분석',
   UNDERSTANDING = '이해',
   MEMORIZATION = '암송',
   TEST = '시험'
 }
+
 
 // FIX: Defined a reusable `IconProps` type that extends React's SVGProps to explicitly include the `title` attribute.
 // This resolves a TypeScript compilation error and ensures icon components can accept a `title` prop for accessibility.

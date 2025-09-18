@@ -302,7 +302,7 @@ const App: React.FC = () => {
         setIsDeleteConfirmOpen(true);
     }, [profile]);
     
-    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, apiKey?: string) => {
+    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, apiKey?: string, mode?: 'general' | 'advanced') => {
         setStatus('loading');
         setError(null);
 
@@ -316,6 +316,7 @@ const App: React.FC = () => {
             }
 
             let sessionToStart: LearningSessionState;
+            const newMode = mode || savedSession?.mode || 'general';
 
             if (savedSession) {
                 if (savedSession.isComplete) {
@@ -347,6 +348,7 @@ const App: React.FC = () => {
                         currentStep: LearningStep.ANALYSIS,
                         messages: [],
                         aiModel: newSelectedModel,
+                        mode: newMode,
                         apiKey: newSelectedModel === 'perplexity' ? encryptedApiKey : undefined,
                         bibleVerse: bibleVerse,
                         score: 0,
@@ -356,7 +358,7 @@ const App: React.FC = () => {
                 } else {
                     // This is resuming an incomplete session. The old session state (including AI model) is preserved.
                     setLoadingMessage(`'${savedSession.topic}' 학습을 다시 시작합니다...`);
-                    sessionToStart = savedSession;
+                    sessionToStart = { ...savedSession, mode: newMode };
                 }
             } else {
                 setLoadingMessage(`'${book}'의 첫 학습 주제를 찾는 중...`);
@@ -383,6 +385,7 @@ const App: React.FC = () => {
                     currentStep: LearningStep.ANALYSIS,
                     messages: [],
                     aiModel: aiModel || 'gemini',
+                    mode: newMode,
                     apiKey: aiModel === 'perplexity' ? encryptedApiKey : undefined,
                     bibleVerse: bibleVerse,
                     score: 0,
