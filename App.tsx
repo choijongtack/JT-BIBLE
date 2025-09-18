@@ -274,13 +274,16 @@ const App: React.FC = () => {
     const handleLogout = useCallback(async () => {
         try {
             await logoutUser();
+        } catch (e) {
+        // ✅ 세션 만료로 인해 logoutUser() 실패하는 경우에도 강제로 로그아웃 처리
+            console.warn("로그아웃 실패 또는 세션 만료. 클라이언트 상태만 초기화합니다.", e);
+        } finally {
+        // 세션 유무와 관계없이 무조건 클라이언트 상태 리셋
             setSession(null);
             setProfile(null);
             setActiveSession(null);
-            setStatus('login');
-        } catch (e) {
-            setError(e instanceof Error ? e.message : '로그아웃 실패');
-            setStatus('error');
+            setStatus('login'); 
+            setError(null); // 오류 메시지도 초기화
         }
     }, []);
 
@@ -293,7 +296,18 @@ const App: React.FC = () => {
             await handleLogout();
         } catch (e) {
             setError(e instanceof Error ? e.message : '계정 삭제에 실패했습니다.');
+            
+            // ✅ 세션 만료 예외 처리
+            if (message.includes("Auth session missing")) {
+                console.warn("세션 만료 상태에서 계정 삭제 시도 → 강제 로그아웃");
+                setLoadingMessage("세션이 만료되어 자동 로그아웃됩니다...");
+                await handleLogout();
+                return;
+            }
+             // 그 외 오류는 에러 화면으로
+            setError(message);
             setStatus('error');
+            //setStatus('error');
         }
     }, [handleLogout]);
 
