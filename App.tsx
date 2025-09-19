@@ -1,6 +1,8 @@
 import React, { useReducer, useCallback, useEffect } from 'react';
 import type { AppStatus, LearningSessionState, Profile, Quiz } from './types';
 import { LearningStep, OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS } from './constants';
+import { BIBLE_METADATA } from './services/bibleData';
+import { parseReference } from './services/bibleUtils';
 import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
 import WelcomeScreen from './components/WelcomeScreen';
@@ -181,6 +183,34 @@ const App: React.FC = () => {
                 dispatch({ type: 'START_LOADING', payload: `'${savedSession.topic}' 학습을 다시 시작합니다...` });
                 sessionToStart = { ...savedSession, mode: newMode };
             } else {
+                if (savedSession?.isComplete) {
+                    const parsedTopic = parseReference(savedSession.topic);
+                    const bookMetadata = BIBLE_METADATA[book];
+                    const lastVerseOfTopic = parsedTopic?.verses[parsedTopic.verses.length - 1];
+
+                    if (parsedTopic && bookMetadata && parsedTopic.chapter === bookMetadata.chapters && lastVerseOfTopic === bookMetadata.versesInLastChapter) {
+                        const allBooks = [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS];
+                        const currentBookIndex = allBooks.indexOf(book);
+                        const nextBook = currentBookIndex !== -1 && currentBookIndex < allBooks.length - 1 ? allBooks[currentBookIndex + 1] : null;
+                        
+                        let message = `축하합니다! '${book}'의 학습을 모두 완료하셨습니다.`;
+                        if (nextBook) {
+                           message += `\n\n이어서 다음 책인 '${nextBook}' 학습을 시작하시겠습니까?`;
+                        }
+                        
+                        if (window.confirm(message)) {
+                            if (nextBook) {
+                                // Start learning the next book recursively
+                                await handleStartLearning(nextBook, aiModel, apiKey, mode);
+                                return;
+                            }
+                        }
+                        // If user cancels or there's no next book, go to idle.
+                        dispatch({ type: 'GO_TO_IDLE' });
+                        return;
+                    }
+                }
+
                 const topicToGet = savedSession?.isComplete ? savedSession.topic : book;
                 const isNextTopic = savedSession?.isComplete;
 
