@@ -9,6 +9,7 @@ import QuizCard from './QuizCard';
 import { decrypt } from '../services/encryptionService';
 import { supabase } from '../services/supabaseClient';
 import { getBibleVerse } from '../services/bibleService';
+import { parseReference } from '../services/bibleUtils';
 
 interface ConversationalLearningProps {
   savedSession: LearningSessionState;
@@ -306,38 +307,6 @@ const isAnswerCorrect = (userAnswer: string, correctAnswer: string): boolean => 
     return false;
 };
 
-interface ParsedReference {
-  book: string;
-  chapter: number;
-  verses: number[];
-}
-
-// "창세기 1:1-5" 와 같은 참조 문자열을 파싱하여 구조화된 객체로 반환합니다.
-function parseRef(reference: string): ParsedReference | null {
-    const match = reference.match(/^([\uAC00-\uD7A3A-Za-z0-9]+)\s+(\d+):(\d+(?:-\d+)?)/);
-    if (!match) return null;
-
-    const book = match[1];
-    const chapter = parseInt(match[2], 10);
-    const versePart = match[3];
-
-    let verses: number[] = [];
-    if (versePart.includes('-')) {
-        const [start, end] = versePart.split('-').map(v => parseInt(v, 10));
-        if (!isNaN(start) && !isNaN(end) && end >= start) {
-            verses = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-        }
-    } else {
-        const v = parseInt(versePart, 10);
-        if (!isNaN(v)) verses = [v];
-    }
-    
-    if (isNaN(chapter) || verses.length === 0) return null;
-
-    return { book, chapter, verses };
-}
-
-
 // ---------------- 메인 컴포넌트 ----------------
 const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip, onSystemBack }) => {
   const { topic, aiModel, mode, apiKey: encryptedApiKey } = savedSession;
@@ -367,30 +336,6 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isInitialized = useRef(false);
   
-  // 학습 도중 다른 창으로 이동하면 세션 저장 후 종료
-  useEffect(() => {
-    const isSavingRef = { current: false }; // 중복 실행 방지 플래그
-
-    const handleVisibilityChange = async () => {
-      if (document.hidden && !isSavingRef.current) {
-        isSavingRef.current = true;
-        try {
-          console.log("학습 도중 다른 창으로 이동 → 세션 저장 후 종료");
-          await onSaveAndExit();  // DB 저장 + 상태 변경
-        } catch (err) {
-          console.error("세션 저장 후 종료 실패:", err);
-        } finally {
-          isSavingRef.current = false;
-        }
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [onSaveAndExit]);
-
   
   // This effect handles the mobile back button press.
   useEffect(() => {
@@ -489,13 +434,13 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
           });
           
           if (bibleVerse) {
-              const sessionRef = parseRef(topic);
+              const sessionRef = parseReference(topic);
               if (!sessionRef) {
                   console.warn("❗ 세션 주제 파싱 실패:", topic);
               } else {
                   const questionsBeforeFilter = parsedQuiz.questions.length;
                   parsedQuiz.questions = parsedQuiz.questions.filter(q => {
-                      const questionRef = parseRef(q.verseReference);
+                      const questionRef = parseReference(q.verseReference);
                       if (!questionRef) {
                           console.warn("❗ 퀴즈 구절 참조 파싱 실패:", q.verseReference);
                           return false;

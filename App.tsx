@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useReducer, useCallback, useEffect } from 'react';
 import type { AppStatus, LearningSessionState, Profile, Quiz } from './types';
 import { LearningStep, OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS } from './constants';
 import LoginScreen from './components/LoginScreen';
@@ -13,599 +13,303 @@ import ProgressDebugPanel from './components/ProgressDebugPanel';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic } from './services/chatgptService';
-import { getProfile, updateUserProgress, saveActiveSession, logoutUser, createProfile, deleteUserAccount, loginUser, registerUser } from './services/userDataService';
-import { supabase } from './services/supabaseClient';
-import type { Session } from '@supabase/supabase-js';
-import { encrypt, decrypt } from './services/encryptionService';
+import { updateUserProgress, saveActiveSession } from './services/userDataService';
+import { encrypt } from './services/encryptionService';
 import type { BookProgress, AiModel } from './types';
-// App.tsx 상단 import 부분에 추가
-import { useBeforeunload } from 'react-beforeunload'; // ✨ 창 닫기 이벤트
 import { getBibleVerse } from './services/bibleService';
-
+import { useProfileSession } from './hooks/useProfileSession';
 
 // A robust function to extract the correct Bible book name from a topic string.
-// It compares the topic against the full list of Bible books to avoid errors
-// with numbered books (e.g., "요한1서") or multi-word names.
 const ALL_BOOKS = [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS].sort((a, b) => b.length - a.length);
 
 const getBookFromTopic = (topic: string): string => {
-    if (!topic || typeof topic !== 'string') {
-        // Return a default or handle error appropriately.
-        return 'Unknown';
-    }
-    // Find the book name that the topic string starts with.
-    // The list is sorted by length descending to match longer names first (e.g., "요한1서" before "요한").
+    if (!topic || typeof topic !== 'string') return 'Unknown';
     const foundBook = ALL_BOOKS.find(bookName => topic.trim().startsWith(bookName));
-
-    // Fallback to the old logic if no match is found, which should be rare.
     return foundBook || topic.split(' ')[0];
 };
 
+// --- State Management with useReducer ---
 
-const App: React.FC = () => {
-    const [status, setStatus] = useState<AppStatus>('loading');
-    const [session, setSession] = useState<Session | null>(null);
-    const [profile, setProfile] = useState<Profile | null>(null);
-    const [activeSession, setActiveSession] = useState<LearningSessionState | null>(null);
-    const [lastSessionResult, setLastSessionResult] = useState<{
+interface AppState {
+    status: AppStatus;
+    activeSession: LearningSessionState | null;
+    lastSessionResult: {
         score: number;
         total: number;
         topic: string;
         exitType: 'quiz' | 'save';
-    }>({ score: 0, total: 0, topic: '', exitType: 'quiz' });
-    const [error, setError] = useState<string | null>(null);
-    const [authError, setAuthError] = useState<string | null>(null);
-    const [loadingMessage, setLoadingMessage] = useState<string>('앱을 초기화하고 Supabase에 연결하는 중...');
-    const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-    const [progressDebugInfo, setProgressDebugInfo] = useState<{
+    };
+    error: string | null;
+    loadingMessage: string;
+    isDeleteConfirmOpen: boolean;
+    progressDebugInfo: {
         before: Profile['progress'] | null;
         request: Profile['progress'] | null;
         after: Profile['progress'] | null;
         error: string | null;
-    } | null>(null);
-    
-    const statusRef = useRef(status);
+    } | null;
+}
 
-    const [endedByUser, setEndedByUser] = useState(false); // ✨ 학습 종료 플래그
-    const endedByUserRef = useRef(false);   // ✨ 최신 endedByUser 값 보관
-    const profileRef = useRef<Profile | null>(null); // ✨ 최신 profile 값 보관
+type AppAction =
+    | { type: 'SET_AUTH_STATUS'; payload: AppStatus }
+    | { type: 'SET_AUTH_ERROR'; payload: string | null }
+    | { type: 'LOGIN_SUCCESS'; payload: { activeSession: LearningSessionState | null } }
+    | { type: 'START_LOADING'; payload: string }
+    | { type: 'SET_ERROR'; payload: string | null }
+    | { type: 'START_LEARNING'; payload: LearningSessionState }
+    | { type: 'UPDATE_LEARNING_STATE'; payload: LearningSessionState }
+    | { type: 'FINISH_LEARNING'; payload: { score: number; total: number; topic: string; debugInfo: any } }
+    | { type: 'SAVE_AND_EXIT'; payload: { topic: string; debugInfo: any } }
+    | { type: 'GO_TO_IDLE' }
+    | { type: 'RESUME_SESSION' }
+    | { type: 'DISCARD_SESSION' }
+    | { type: 'OPEN_DELETE_MODAL' }
+    | { type: 'CLOSE_DELETE_MODAL' };
 
-    
-    // App 컴포넌트 안쪽 useEffect 위쪽에 추가 ✨ LocalStorage 초기 로드
+const initialState: AppState = {
+    status: 'loading',
+    activeSession: null,
+    lastSessionResult: { score: 0, total: 0, topic: '', exitType: 'quiz' },
+    error: null,
+    loadingMessage: '앱을 초기화하고 Supabase에 연결하는 중...',
+    isDeleteConfirmOpen: false,
+    progressDebugInfo: null,
+};
+
+const appReducer = (state: AppState, action: AppAction): AppState => {
+    switch (action.type) {
+        case 'SET_AUTH_STATUS':
+            return { ...state, status: action.payload, loadingMessage: '' };
+        case 'SET_AUTH_ERROR':
+            return { ...state, error: action.payload }; // This could be used for login/register errors
+        case 'LOGIN_SUCCESS':
+            return {
+                ...state,
+                activeSession: action.payload.activeSession,
+                status: action.payload.activeSession ? 'session-prompt' : 'idle',
+            };
+        case 'START_LOADING':
+            return { ...state, status: 'loading', loadingMessage: action.payload, error: null };
+        case 'SET_ERROR':
+            return { ...state, status: 'error', error: action.payload, progressDebugInfo: null };
+        case 'START_LEARNING':
+            return { ...state, status: 'learning', activeSession: action.payload };
+        case 'UPDATE_LEARNING_STATE':
+            return { ...state, activeSession: action.payload };
+        case 'FINISH_LEARNING':
+            return {
+                ...state,
+                status: 'finished',
+                activeSession: null,
+                lastSessionResult: { ...action.payload, exitType: 'quiz' },
+                progressDebugInfo: action.payload.debugInfo,
+            };
+        case 'SAVE_AND_EXIT':
+            return {
+                ...state,
+                status: 'finished',
+                activeSession: null,
+                lastSessionResult: { score: -1, total: 0, topic: action.payload.topic, exitType: 'save' },
+                progressDebugInfo: action.payload.debugInfo,
+            };
+        case 'GO_TO_IDLE':
+            return { ...state, status: 'idle', activeSession: null, error: null, progressDebugInfo: null };
+        case 'RESUME_SESSION':
+            return { ...state, status: 'learning' };
+        case 'DISCARD_SESSION':
+            return { ...state, status: 'idle', activeSession: null };
+        case 'OPEN_DELETE_MODAL':
+            return { ...state, isDeleteConfirmOpen: true };
+        case 'CLOSE_DELETE_MODAL':
+            return { ...state, isDeleteConfirmOpen: false };
+        default:
+            return state;
+    }
+};
+
+const App: React.FC = () => {
+    const [state, dispatch] = useReducer(appReducer, initialState);
+    const { status, activeSession, lastSessionResult, error, loadingMessage, isDeleteConfirmOpen, progressDebugInfo } = state;
+
+    const {
+        authStatus,
+        session,
+        profile,
+        authError,
+        login,
+        register,
+        logout,
+        deleteAccount,
+        setProfile,
+        setAuthError
+    } = useProfileSession();
+
+    // FIX: Correctly map `AuthStatus` to the appropriate `AppStatus` or action. The previous implementation caused a type error by dispatching `authStatus` values like 'authenticated' and 'unauthenticated', which are not valid `AppStatus` values. This logic now correctly handles each authentication state.
     useEffect(() => {
-        try {
-            const savedProfile = localStorage.getItem("profile");
-            const savedSession = localStorage.getItem("activeSession");
-            if (savedProfile) setProfile(JSON.parse(savedProfile));
-            if (savedSession) setActiveSession(JSON.parse(savedSession));
-            if (savedProfile) {
-                setStatus('idle'); // 프로필이 있으면 바로 환영화면으로
-                setLoadingMessage("LocalStorage에서 상태 복원됨");
+        if (authStatus === 'authenticated') {
+            // When authenticated, the LOGIN_SUCCESS action determines the next app state ('idle' or 'session-prompt').
+            // We don't dispatch SET_AUTH_STATUS directly.
+            if (profile) {
+                dispatch({ type: 'LOGIN_SUCCESS', payload: { activeSession: profile.active_learning_session } });
             }
-        } catch (e) {
-            console.warn("LocalStorage 로드 실패:", e);
+        } else if (authStatus === 'unauthenticated') {
+            // Map 'unauthenticated' from the auth hook to the 'login' screen state.
+            dispatch({ type: 'SET_AUTH_STATUS', payload: 'login' });
+        } else {
+            // Handle statuses that are common between AuthStatus and AppStatus:
+            // 'loading', 'awaiting-confirmation', 'profile_error'
+            dispatch({ type: 'SET_AUTH_STATUS', payload: authStatus });
         }
-    }, []);
-
-    useEffect(() => {
-    endedByUserRef.current = endedByUser;
-    }, [endedByUser]);
-
-    useEffect(() => {
-    profileRef.current = profile;
-    }, [profile]);
+    }, [authStatus, profile]);
 
 
-   
-    // ✨ 추가: 크롬 창 전환 시 localStorage 저장/복원
-    useEffect(() => {
-        const handleVisibilityChange = () => {
-            if (document.hidden) {
-                if (profile) localStorage.setItem("profile", JSON.stringify(profile));
-                if (activeSession) localStorage.setItem("activeSession", JSON.stringify(activeSession));
-            } else {
-                try {
-                    const savedProfile = localStorage.getItem("profile");
-                    const savedSession = localStorage.getItem("activeSession");
-                    if (savedProfile) setProfile(JSON.parse(savedProfile));
-                    if (savedSession) setActiveSession(JSON.parse(savedSession));
-                } catch (e) {
-                    console.warn("visibilitychange 복원 실패:", e);
-                }
-            }
-        };
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-        return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-    }, [profile, activeSession]);
-
-
-
-    useBeforeunload(async () => {
-        try {
-            if (activeSession && profile?.id) {
-                await saveActiveSession(activeSession); // 세션 저장
-                const book = getBookFromTopic(activeSession.topic);
-                await updateUserProgress(book, {
-                    lastSession: activeSession,
-                    completedTopics: profile.progress?.[book]?.completedTopics || []
-                });
-            }
-            await logoutUser(); // 로그아웃
-        } catch (err) {
-            console.error("beforeunload 처리 중 오류:", err);
-        }
-    });
-
-    useEffect(() => {
-        statusRef.current = status;
-    }, [status]);
-
-    useEffect(() => {
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-            if (session && (statusRef.current === 'login' || statusRef.current === 'loading' || statusRef.current === 'awaiting-confirmation')) {
-                setLoadingMessage('인증 상태 변경 감지됨...');
-            }
-            
-            if (!session?.user) {
-                setSession(null);
-                setProfile(null);
-                setActiveSession(null);
-                if (statusRef.current !== 'awaiting-confirmation' && statusRef.current !== 'profile_error') {
-                    setStatus('login');
-                }
-                return;
-            }
-            
-            if (statusRef.current === 'profile_error') return;
- 
-            // ✨ 학습 종료 후엔 프로필 재조회 스킵
-            //if (endedByUserRef.current) {
-            //    console.log("사용자 요청으로 학습 종료됨 → idle 유지");
-            //    endedByUserRef.current = false; // 플래그 초기화
-            //    setStatus('idle');
-            //    return;
-            //}
-
-            // ✨ 이미 프로필 있고 idle/finished 상태라면 그대로 둠
-            if (profileRef.current && ['idle', 'finished'].includes(statusRef.current)) {
-                console.log("세션 유지: 기존 프로필 그대로 사용");
-                return;
-            }
-
-            if (statusRef.current !== 'loading') {
-                setStatus('loading');
-            }
-
-            setLoadingMessage('세션 확인됨. 프로필 조회 시도 중...');
-            setAuthError(null);
-            
-            try {
-                let userProfile = await getProfile();
-                
-                if (!userProfile) {
-                    setLoadingMessage('기존 프로필 없음. 신규 프로필 생성 시도 중...');
-                    userProfile = await createProfile(session.user.email);
-                    if (userProfile) {
-                        setLoadingMessage('신규 프로필 생성 성공.');
-                    }
-                } else {
-                     setLoadingMessage('기존 프로필을 성공적으로 불러왔습니다.');
-                }
-
-                 // ✨ Supabase 실패 시 localStorage fallback
-                if (!userProfile) {
-                    const savedProfile = localStorage.getItem("profile");
-                    if (savedProfile) {
-                        userProfile = JSON.parse(savedProfile);
-                        console.warn("Supabase 프로필 조회 실패 → localStorage로 대체");
-                    }
-                }
-
-                if (!userProfile) {
-                    throw new Error("사용자 프로필을 가져오거나 생성하는 데 최종적으로 실패했습니다.");
-                }
-
-                setLoadingMessage('프로필 확인 완료. 앱 상태 설정 중...');
-                setSession(session);
-                setProfile(userProfile);
-                
-                if (
-                    userProfile.active_learning_session &&
-                    typeof userProfile.active_learning_session === 'object' &&
-                    userProfile.active_learning_session !== null &&
-                    typeof (userProfile.active_learning_session as any).topic === 'string' &&
-                    (userProfile.active_learning_session as any).topic.length > 0
-                ) {
-                    setLoadingMessage('진행 중인 학습 세션을 발견했습니다.');
-                    setActiveSession(userProfile.active_learning_session as LearningSessionState);
-                    setStatus('session-prompt');
-                } else {
-                    setLoadingMessage('준비 완료. 환영 화면으로 이동합니다.');
-                    setActiveSession(null);
-                    if (userProfile.id && userProfile.active_learning_session) {
-                        console.warn("Clearing invalid active session data from profile:", userProfile.active_learning_session);
-                        await saveActiveSession(null);
-                    }
-                    setStatus('idle');
-                }
-            } catch (e) {
-                // ✨ 수정: catch에서도 localStorage fallback 시도
-                const savedProfile = localStorage.getItem("profile"); // ✨ 수정
-                if (savedProfile) { // ✨ 수정
-                    setProfile(JSON.parse(savedProfile)); // ✨ 수정
-                    setStatus('idle'); // ✨ 수정
-                    return; // ✨ 수정
-                }
-                
-                const errorMessage = e instanceof Error ? e.message : "프로필을 로드하는 동안 알 수 없는 오류가 발생했습니다.";
-                console.error("Profile loading/creation failed:", errorMessage);
-                
-                setError(errorMessage);
-                setStatus('profile_error');
-            }
-        });
-
-        return () => {
-            subscription.unsubscribe();
-        };
-    }, []); // ✨ FIX: Dependency array changed from [profile] to []
-    
-    const handleLogin = useCallback(async (email: string, password: string) => {
-        try {
-            setAuthError(null);
-            await loginUser(email, password);
-        } catch (e) {
-            setAuthError(e instanceof Error ? e.message : '로그인 실패');
-            throw e;
-        }
-    }, []);
-
-    const handleRegister = useCallback(async (email: string, password: string) => {
-        try {
-            setAuthError(null);
-            await registerUser(email, password);
-            setStatus('awaiting-confirmation');
-        } catch (e) {
-            setAuthError(e instanceof Error ? e.message : '가입 실패');
-            throw e;
-        }
-    }, []);
-
-    const handleLogout = useCallback(async () => {
-        try {
-            await logoutUser();
-        } catch (e) {
-        // ✅ 세션 만료로 인해 logoutUser() 실패하는 경우에도 강제로 로그아웃 처리
-            console.warn("로그아웃 실패 또는 세션 만료. 클라이언트 상태만 초기화합니다.", e);
-        } finally {
-        // 세션 유무와 관계없이 무조건 클라이언트 상태 리셋
-            setSession(null);
-            setProfile(null);
-            setActiveSession(null);
-            setStatus('login'); 
-            setError(null); // 오류 메시지도 초기화
-        }
-    }, []);
-
-    const executeDeleteUser = useCallback(async () => {
-        setIsDeleteConfirmOpen(false);
-        setStatus('loading');
-        setLoadingMessage('계정을 삭제하는 중입니다...');
-        try {
-            await deleteUserAccount();
-            await handleLogout();
-        } catch (e) {
-            setError(e instanceof Error ? e.message : '계정 삭제에 실패했습니다.');
-            
-            // ✅ 세션 만료 예외 처리
-            if (message.includes("Auth session missing")) {
-                console.warn("세션 만료 상태에서 계정 삭제 시도 → 강제 로그아웃");
-                setLoadingMessage("세션이 만료되어 자동 로그아웃됩니다...");
-                await handleLogout();
-                return;
-            }
-             // 그 외 오류는 에러 화면으로
-            setError(message);
-            setStatus('error');
-            //setStatus('error');
-        }
-    }, [handleLogout]);
-
-    const handleDeleteUser = useCallback(() => {
-        if (!profile) return;
-        setIsDeleteConfirmOpen(true);
-    }, [profile]);
-    
     const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, apiKey?: string, mode?: 'general' | 'advanced') => {
-        setStatus('loading');
-        setError(null);
+        dispatch({ type: 'START_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
 
         try {
             const savedBookProgress = profile?.progress?.[book];
             let savedSession = savedBookProgress?.lastSession;
 
             if (savedSession && (typeof savedSession.topic !== 'string' || !savedSession.topic)) {
-                console.warn(`Saved session for "${book}" is missing a valid topic. A new session will be started.`, savedSession);
                 savedSession = undefined;
             }
 
             let sessionToStart: LearningSessionState;
             const newMode = mode || savedSession?.mode || 'general';
 
-            if (savedSession) {
-                if (savedSession.isComplete) {
-                    // This is not resuming, but starting the NEXT session for the same book.
-                    // The user's new AI model selection should apply.
-                    setLoadingMessage(`'${savedSession.topic}' 이후의 학습 주제를 찾는 중...`);
-                    const newSelectedModel = aiModel || 'gemini';
-            
-                    let nextTopic: string;
-                    if (newSelectedModel === 'perplexity' && apiKey) {
-                        nextTopic = await getNextPerplexityStudyTopic(savedSession.topic, apiKey);
-                    } else if (newSelectedModel === 'chatgpt') {
-                        nextTopic = await getNextChatGptStudyTopic(savedSession.topic);
-                    } else {
-                        nextTopic = await getNextGeminiStudyTopic(savedSession.topic);
-                    }
-                    
-                    setLoadingMessage(`'${nextTopic}' 본문을 불러오는 중...`);
-                    const { text: bibleVerse } = await getBibleVerse(nextTopic);
-
-                    let encryptedApiKey: string | undefined = apiKey;
-                    if (apiKey && newSelectedModel === 'perplexity') {
-                        if (!session?.access_token) throw new Error("API 키를 암호화하기 위한 인증 토큰을 찾을 수 없습니다.");
-                        encryptedApiKey = await encrypt(apiKey, session.access_token);
-                    }
-            
-                    sessionToStart = {
-                        topic: nextTopic,
-                        currentStep: LearningStep.ANALYSIS,
-                        messages: [],
-                        aiModel: newSelectedModel,
-                        mode: newMode,
-                        apiKey: newSelectedModel === 'perplexity' ? encryptedApiKey : undefined,
-                        bibleVerse: bibleVerse,
-                        score: 0,
-                        quizData: null,
-                        currentQuestionIndex: 0
-                    };
-                } else {
-                    // This is resuming an incomplete session. The old session state (including AI model) is preserved.
-                    setLoadingMessage(`'${savedSession.topic}' 학습을 다시 시작합니다...`);
-                    sessionToStart = { ...savedSession, mode: newMode };
-                }
+            if (savedSession && !savedSession.isComplete) {
+                dispatch({ type: 'START_LOADING', payload: `'${savedSession.topic}' 학습을 다시 시작합니다...` });
+                sessionToStart = { ...savedSession, mode: newMode };
             } else {
-                setLoadingMessage(`'${book}'의 첫 학습 주제를 찾는 중...`);
-                 let firstTopic: string;
-                if (aiModel === 'perplexity' && apiKey) {
-                    firstTopic = await getPerplexityStudyTopic(book, apiKey);
-                } else if (aiModel === 'chatgpt') {
-                    firstTopic = await getChatGptStudyTopic(book);
+                const topicToGet = savedSession?.isComplete ? savedSession.topic : book;
+                const isNextTopic = savedSession?.isComplete;
+
+                dispatch({ type: 'START_LOADING', payload: `'${topicToGet}'${isNextTopic ? ' 다음' : '의 첫'} 주제를 찾는 중...` });
+                const newSelectedModel = aiModel || 'gemini';
+
+                let nextTopic: string;
+                if (newSelectedModel === 'perplexity' && apiKey) {
+                    nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, apiKey) : await getPerplexityStudyTopic(topicToGet, apiKey);
+                } else if (newSelectedModel === 'chatgpt') {
+                    nextTopic = isNextTopic ? await getNextChatGptStudyTopic(topicToGet) : await getChatGptStudyTopic(topicToGet);
                 } else {
-                    firstTopic = await getGeminiStudyTopic(book);
+                    nextTopic = isNextTopic ? await getNextGeminiStudyTopic(topicToGet) : await getGeminiStudyTopic(topicToGet);
                 }
 
-                setLoadingMessage(`'${firstTopic}' 본문을 불러오는 중...`);
-                const { text: bibleVerse } = await getBibleVerse(firstTopic);
-                
+                dispatch({ type: 'START_LOADING', payload: `'${nextTopic}' 본문을 불러오는 중...` });
+                const { text: bibleVerse } = await getBibleVerse(nextTopic);
+
                 let encryptedApiKey: string | undefined = apiKey;
-                if (apiKey && (aiModel === 'perplexity')) { // Only Perplexity key is encrypted and stored in session state
+                if (apiKey && newSelectedModel === 'perplexity') {
                     if (!session?.access_token) throw new Error("API 키를 암호화하기 위한 인증 토큰을 찾을 수 없습니다.");
                     encryptedApiKey = await encrypt(apiKey, session.access_token);
                 }
 
                 sessionToStart = {
-                    topic: firstTopic,
+                    topic: nextTopic,
                     currentStep: LearningStep.ANALYSIS,
                     messages: [],
-                    aiModel: aiModel || 'gemini',
+                    aiModel: newSelectedModel,
                     mode: newMode,
-                    apiKey: aiModel === 'perplexity' ? encryptedApiKey : undefined,
+                    apiKey: newSelectedModel === 'perplexity' ? encryptedApiKey : undefined,
                     bibleVerse: bibleVerse,
-                    score: 0,
-                    quizData: null,
-                    currentQuestionIndex: 0
+                    score: 0, quizData: null, currentQuestionIndex: 0
                 };
             }
-            
-            setActiveSession(sessionToStart);
-            setStatus('learning');
-
+            dispatch({ type: 'START_LEARNING', payload: sessionToStart });
         } catch (e) {
-            setError(e instanceof Error ? e.message : '학습 세션을 시작하는 데 실패했습니다.');
-            setStatus('error');
+            const message = e instanceof Error ? e.message : '학습 세션을 시작하는 데 실패했습니다.';
+            dispatch({ type: 'SET_ERROR', payload: message });
         }
     }, [profile, session]);
 
     const handleFinishLearning = useCallback(async (score: number, total: number) => {
-        if (!activeSession || !profile || typeof activeSession.topic !== 'string' || !activeSession.topic) {
-            console.error("handleFinishLearning called with invalid activeSession or missing topic.", activeSession);
-            setError("학습 세션을 완료할 수 없습니다: 유효하지 않은 세션 데이터입니다.");
-            setStatus('error');
+        if (!activeSession || !profile || !activeSession.topic) {
+            dispatch({ type: 'SET_ERROR', payload: "학습 세션을 완료할 수 없습니다: 유효하지 않은 세션 데이터입니다." });
             return;
         }
-
-        setProgressDebugInfo(null); 
 
         const book = getBookFromTopic(activeSession.topic);
-        
-        const currentBookProgress = profile.progress?.[book] || {
-            lastSession: activeSession,
-            completedTopics: []
+        const currentBookProgress = profile.progress?.[book] || { lastSession: activeSession, completedTopics: [] };
+        const completedTopicsSet = new Set(currentBookProgress.completedTopics).add(activeSession.topic);
+
+        const sessionToSave: LearningSessionState = {
+            ...activeSession, isComplete: true, messages: [], bibleVerse: null,
+            currentStep: LearningStep.ANALYSIS, quizData: null, currentQuestionIndex: 0, score: 0
         };
 
-        const completedTopicsSet = new Set(currentBookProgress.completedTopics);
-        completedTopicsSet.add(activeSession.topic);
-
-        const sessionToSave: LearningSessionState = { 
-            ...activeSession, 
-            isComplete: true,
-            messages: [], 
-            bibleVerse: null,
-            currentStep: LearningStep.ANALYSIS,
-            quizData: null,
-            currentQuestionIndex: 0,
-            score: 0
-        };
-
-        const newBookProgress: BookProgress = {
-            lastSession: sessionToSave,
-            completedTopics: Array.from(completedTopicsSet)
-        };
-
+        const newBookProgress: BookProgress = { lastSession: sessionToSave, completedTopics: Array.from(completedTopicsSet) };
         const result = await updateUserProgress(book, newBookProgress);
-        setProgressDebugInfo(result);
 
         if (result.error || !result.after) {
-            const errorMessage = result.error || '진행 상황을 업데이트하는 데 실패했습니다.';
-            setError(errorMessage);
-            setStatus('error');
+            dispatch({ type: 'SET_ERROR', payload: result.error || '진행 상황을 업데이트하는 데 실패했습니다.' });
             return;
         }
 
-        setProfile(prev => {
-            const updated = prev ? { ...prev, progress: result.after } : null;
-            if (updated) localStorage.setItem("profile", JSON.stringify(updated)); // 추가
-            return updated;
-        });
-          
-        
-        setLastSessionResult({ score, total, topic: activeSession.topic, exitType: 'quiz' });
-        setActiveSession(null);
-        if (profile?.id) {
-            await saveActiveSession(null);
-        }
-        setStatus('finished');
-    }, [activeSession, profile]);
-    
-    const saveCurrentSession = useCallback(async () => {
-        if (!activeSession || !profile || typeof activeSession.topic !== 'string' || !activeSession.topic) {
-            setActiveSession(null);
-            if (profile?.id) await saveActiveSession(null);
-            return { success: false, fromError: false, result: null };
-        }
-    
-        const sessionTopic = activeSession.topic;
-    
-        const book = getBookFromTopic(sessionTopic);
-        
-        const currentBookProgress = profile.progress?.[book] || {
-            lastSession: activeSession,
-            completedTopics: []
-        };
-    
-        const sessionToSave = { ...activeSession, isComplete: false };
-        
-        const newBookProgress: BookProgress = {
-            ...currentBookProgress,
-            lastSession: sessionToSave
-        };
-    
-        const result = await updateUserProgress(book, newBookProgress);
-    
-        if (result.error || !result.after) {
-            const errorMessage = result.error || '진행 상황을 업데이트하는 데 실패했습니다.';
-            setError(errorMessage);
-            return { success: false, fromError: true, result };
-        }
-    
-        setProfile(prev => prev ? { ...prev, progress: result.after } : null);
+        setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
         await saveActiveSession(null);
-        setActiveSession(null);
-        return { success: true, topic: sessionTopic, result };
-    
-    }, [activeSession, profile]);
+        dispatch({ type: 'FINISH_LEARNING', payload: { score, total, topic: activeSession.topic, debugInfo: result } });
 
-    const handleSaveAndExit = useCallback(async () => {
-        const { success, fromError, topic, result } = await saveCurrentSession();
-        setProgressDebugInfo(result);
+    }, [activeSession, profile, setProfile]);
 
-        if (success) {
-            setEndedByUser(true); // ✨ 학습창에서 정상 종료됨 표시
-            setLastSessionResult({
-                score: -1, 
-                total: 0,
-                topic: topic || '',
-                exitType: 'save'
-            });
-            setStatus('finished');
-        } else if (fromError) {
-            setStatus('error');
-        } else {
-            setStatus('idle');
-        }
-    }, [saveCurrentSession]);
-
-    const handleSystemBack = useCallback(async () => {
-        const { fromError, result } = await saveCurrentSession();
-        if (fromError) {
-            setProgressDebugInfo(result);
-            setStatus('error');
-        } else {
-            setStatus('idle');
-        }
-    }, [saveCurrentSession]);
-
-
-    const handleSkipTest = useCallback(async () => {
-        if (!activeSession) {
-            setStatus('idle');
+    const saveCurrentSession = useCallback(async (isSystemBack: boolean = false) => {
+        if (!activeSession || !profile || !activeSession.topic) {
+            dispatch({ type: 'GO_TO_IDLE' });
             return;
         }
-    
-        // 세션이 삭제되었으므로 활성 세션을 지웁니다.
-        setActiveSession(null);
-        if (profile?.id) {
-            await saveActiveSession(null);
-        }
-        
-        // 메인 화면으로 돌아갑니다.
-        setStatus('idle');
-    }, [activeSession, profile?.id]);
 
-    const handleStateChange = useCallback(async (newState: LearningSessionState) => {
-        setActiveSession(newState);
-        localStorage.setItem("activeSession", JSON.stringify(newState)); // 추가
-        if (profile?.id) {
-            await saveActiveSession(newState);
-        }
-    }, [profile?.id]);
+        const book = getBookFromTopic(activeSession.topic);
+        const currentBookProgress = profile.progress?.[book] || { lastSession: activeSession, completedTopics: [] };
+        const sessionToSave = { ...activeSession, isComplete: false };
+        const newBookProgress: BookProgress = { ...currentBookProgress, lastSession: sessionToSave };
+        const result = await updateUserProgress(book, newBookProgress);
 
-    const handleRestart = useCallback(() => {
-        setStatus('idle');
-        setActiveSession(null);
-        setLastSessionResult({ score: 0, total: 0, topic: '', exitType: 'quiz' });
-    }, []);
-    
-    const handleResume = useCallback(() => {
-        setStatus('learning');
-    }, []);
-    
-    const handleDiscard = useCallback(() => {
-        setActiveSession(null);
-        if(profile?.id) {
-          saveActiveSession(null).then(() => {
-             setStatus('idle');
-          });
+        if (result.error || !result.after) {
+            dispatch({ type: 'SET_ERROR', payload: result.error || '진행 상황을 업데이트하는 데 실패했습니다.' });
+            return;
+        }
+
+        setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
+        await saveActiveSession(null);
+
+        if (isSystemBack) {
+            dispatch({ type: 'GO_TO_IDLE' });
         } else {
-           setStatus('idle');
+            dispatch({ type: 'SAVE_AND_EXIT', payload: { topic: activeSession.topic, debugInfo: result } });
         }
+    }, [activeSession, profile, setProfile]);
+    
+    const handleStateChange = useCallback(async (newState: LearningSessionState) => {
+        dispatch({ type: 'UPDATE_LEARNING_STATE', payload: newState });
+        if (profile?.id) await saveActiveSession(newState);
     }, [profile?.id]);
-
-    const handleBackToMain = useCallback(() => {
-        setError(null);
-        setStatus('idle');
-    }, []);
 
     const handleGptKeySaved = useCallback(() => {
         setProfile(prev => {
             if (!prev) return null;
-            // Add a placeholder to indicate the key is saved.
-            // The WelcomeScreen useEffect will see this and switch to 'saved' mode.
             return { ...prev, chatgpt_api_key: 'key_saved_placeholder' };
         });
-    }, []);
-    
+    }, [setProfile]);
+
+    const handleDiscard = useCallback(() => {
+        if(profile?.id) saveActiveSession(null);
+        dispatch({ type: 'DISCARD_SESSION' });
+    }, [profile?.id]);
+
+    const executeDelete = useCallback(async () => {
+        dispatch({ type: 'CLOSE_DELETE_MODAL' });
+        dispatch({ type: 'START_LOADING', payload: '계정을 삭제하는 중입니다...' });
+        try {
+            await deleteAccount();
+        } catch (e) {
+            const message = e instanceof Error ? e.message : '계정 삭제 실패';
+            if (message.includes("Auth session missing")) {
+                await logout(); // Force logout
+            } else {
+                dispatch({ type: 'SET_ERROR', payload: message });
+            }
+        }
+    }, [deleteAccount, logout]);
 
     const renderContent = () => {
         switch (status) {
@@ -617,59 +321,43 @@ const App: React.FC = () => {
                     </div>
                 );
             case 'login':
-                return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} error={authError} />;
+                return <LoginScreen onLogin={login} onRegister={register} error={authError} />;
             case 'awaiting-confirmation':
-                return <AwaitingConfirmationScreen onBackToLogin={() => setStatus('login')} />;
+                return <AwaitingConfirmationScreen onBackToLogin={() => dispatch({ type: 'SET_AUTH_STATUS', payload: 'login' })} />;
             case 'profile_error':
-                 return <ProfileErrorScreen error={error || "알 수 없는 프로필 오류가 발생했습니다."} onLogout={handleLogout} />;
+                 return <ProfileErrorScreen error={authError || "알 수 없는 프로필 오류가 발생했습니다."} onLogout={logout} />;
             case 'idle':
                 return (
-                    <div className="w-full min-h-screen flex items-center justify-center p-4">
-                        <WelcomeScreen 
-                            onStart={handleStartLearning} 
-                            profile={profile}
-                            onLogout={handleLogout}
-                            onDelete={handleDeleteUser}
-                            onGptKeySaved={handleGptKeySaved}
-                        />
-                    </div>
+                    <WelcomeScreen onStart={handleStartLearning} profile={profile} onLogout={logout} onDelete={() => dispatch({ type: 'OPEN_DELETE_MODAL' })} onGptKeySaved={handleGptKeySaved} />
                 );
             case 'session-prompt':
                 if (!activeSession) {
-                    setStatus('idle');
+                    dispatch({ type: 'GO_TO_IDLE' });
                     return null;
                 }
-                return <ResumeSessionPrompt session={activeSession} onResume={handleResume} onDiscard={handleDiscard} />;
+                return <ResumeSessionPrompt session={activeSession} onResume={() => dispatch({ type: 'RESUME_SESSION' })} onDiscard={handleDiscard} />;
             case 'learning':
                 if (!activeSession) {
-                     setStatus('idle');
+                     dispatch({ type: 'GO_TO_IDLE' });
                      return null;
                 }
-                return <ConversationalLearning 
-                    savedSession={activeSession} 
+                return <ConversationalLearning
+                    savedSession={activeSession}
                     onStateChange={handleStateChange}
                     onFinish={handleFinishLearning}
-                    onBack={handleBackToMain}
-                    onSaveAndExit={handleSaveAndExit}
-                    onSkip={handleSkipTest}
-                    onSystemBack={handleSystemBack}
+                    onBack={() => dispatch({ type: 'GO_TO_IDLE' })}
+                    onSaveAndExit={() => saveCurrentSession(false)}
+                    onSkip={() => dispatch({ type: 'GO_TO_IDLE' })}
+                    onSystemBack={() => saveCurrentSession(true)}
                 />;
             case 'finished':
-                return <ResultsScreen 
-                    lastResult={lastSessionResult}
-                    onRestart={handleRestart}
-                    onContinue={handleStartLearning}
-                    progressDebugInfo={progressDebugInfo}
-                />;
+                return <ResultsScreen lastResult={lastSessionResult} onRestart={() => dispatch({ type: 'GO_TO_IDLE' })} onContinue={handleStartLearning} progressDebugInfo={progressDebugInfo} />;
             case 'error':
                 return (
                     <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-2xl mx-auto">
                         <h2 className="text-3xl font-bold text-red-400 mb-4">오류가 발생했습니다</h2>
                         <pre className="text-slate-300 text-left bg-slate-900/50 p-4 rounded-md font-mono text-sm mb-6 whitespace-pre-wrap">{error}</pre>
-                        <button
-                            onClick={handleBackToMain}
-                            className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all"
-                        >
+                        <button onClick={() => dispatch({ type: 'GO_TO_IDLE' })} className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all">
                             메인 화면으로 돌아가기
                         </button>
                         <ProgressDebugPanel debugInfo={progressDebugInfo} />
@@ -679,14 +367,24 @@ const App: React.FC = () => {
     };
 
     return (
-        <main className="w-full min-h-screen flex items-center justify-center p-4 font-sans antialiased">
-            {renderContent()}
-            <DeleteConfirmationModal
-                isOpen={isDeleteConfirmOpen}
-                onConfirm={executeDeleteUser}
-                onCancel={() => setIsDeleteConfirmOpen(false)}
-            />
-        </main>
+        <div className="relative min-h-screen w-full font-sans antialiased">
+            {/* 배경 이미지 */}
+            <div className="fixed inset-0 z-0">
+                <img 
+                  src="https://images.unsplash.com/photo-1517090510947-30c819a56e80?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiaWJsZSUyMGJvb2slMjBvcGVuJTIwcGFnZXN8ZW58MXx8fHwxNzU4MjU1OTI0fDA&ixlib=rb-4.1.0&q=80&w=1080"
+                  alt="성경책 배경"
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-br from-slate-900/90 via-slate-800/85 to-slate-900/90"></div>
+            </div>
+
+            {/* 콘텐츠 */}
+            <main className="relative z-10 w-full min-h-screen flex items-center justify-center p-4">
+                {renderContent()}
+            </main>
+
+            <DeleteConfirmationModal isOpen={isDeleteConfirmOpen} onConfirm={executeDelete} onCancel={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })} />
+        </div>
     );
 };
 

@@ -1,40 +1,9 @@
 import { supabase } from './supabaseClient';
-
-interface ParsedReference {
-  book: string;
-  chapter: number;
-  verses: number[];
-}
+import { parseReference } from './bibleUtils';
 
 interface BibleVerseResult {
   text: string | null;
   error: string | null;
-}
-
-/**
- * "잠언 1:1-7" → { book: "잠언", chapter: 1, verses: [1..7] }
- * "창세기 1:1" → { book: "창세기", chapter: 1, verses: [1] }
- */
-function parseReference(reference: string): ParsedReference | null {
-  const match = reference.match(/^([\uAC00-\uD7A3A-Za-z0-9]+)\s+(\d+):(\d+(?:-\d+)?)/);
-  if (!match) return null;
-
-  const book = match[1];
-  const chapter = Number(match[2]);
-  const versePart = match[3];
-
-  let verses: number[] = [];
-  if (versePart.includes('-')) {
-    const [start, end] = versePart.split('-').map(v => Number(v));
-    if (!isNaN(start) && !isNaN(end) && end >= start) {
-      verses = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-    }
-  } else {
-    const v = Number(versePart);
-    if (!isNaN(v)) verses = [v];
-  }
-
-  return { book, chapter, verses };
 }
 
 /**

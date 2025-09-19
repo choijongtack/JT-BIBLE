@@ -1,4 +1,4 @@
-// services/instructionTemplate.ts
+import { parseReference } from './bibleUtils';
 
 /**
  * "창세기 1:1-5"와 같은 주제 문자열에서 구절 수를 계산하는 헬퍼 함수
@@ -6,30 +6,14 @@
  * @returns 구절의 총 개수
  */
 const getVerseCount = (topic: string): number => {
+    const parsed = parseReference(topic);
     // 주제가 유효하지 않을 경우, 0개의 질문을 생성하지 않도록 5개로 기본 설정합니다.
     const fallbackCount = 5; 
-    if (!topic || typeof topic !== 'string') return fallbackCount;
-
-    // 책 이름, 장, 절 부분을 캡처하는 정규식입니다.
-    // '요한1서'와 같이 숫자가 포함된 책 이름도 처리합니다.
-    const match = topic.match(/^([\uAC00-\uD7A3A-Za-z0-9]+)\s+(\d+):(\d+(?:-\d+)?)/);
-    if (!match) return fallbackCount;
-
-    const versePart = match[3]; // 예: "1-5" 또는 "7"
-    let verseCount = 0;
-
-    if (versePart.includes('-')) {
-        const [start, end] = versePart.split('-').map(v => parseInt(v, 10));
-        if (!isNaN(start) && !isNaN(end) && end >= start) {
-            verseCount = end - start + 1;
-        }
-    } else {
-        const v = parseInt(versePart, 10);
-        if (!isNaN(v)) verseCount = 1;
-    }
     
-    // 항상 양수의 질문 개수를 반환하도록 보장합니다.
-    return verseCount > 0 ? verseCount : fallbackCount;
+    if (!parsed || parsed.verses.length === 0) {
+        return fallbackCount;
+    }
+    return parsed.verses.length;
 };
 
 
