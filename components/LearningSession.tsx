@@ -3,7 +3,7 @@ import { continueLearningConversation as continueGeminiConversation } from '../s
 import { continueLearningConversation as continuePerplexityConversation } from '../services/perplexityService';
 import { continueLearningConversation as continueChatGptConversation } from '../services/chatgptService';
 import { LearningStep } from '../constants';
-import type { Quiz, ChatMessage, LearningSessionState, AiModel } from '../types';
+import type { Quiz, ChatMessage, LearningSessionState, AiModel, FillInTheBlankQuestion } from '../types';
 import { QuestionType } from '../types';
 import QuizCard from './QuizCard';
 import { decrypt } from '../services/encryptionService';
@@ -251,6 +251,55 @@ const StepControl: React.FC<{
 
 // ---------------- Helper Functions ----------------
 
+/**
+ * AI가 유효한 퀴즈를 생성하지 못했을 때 DB 기반의 대체 퀴즈를 생성합니다.
+ * @param topic 현재 학습 주제 (예: "창세기 1:1-5")
+ * @param bibleVerse DB에서 가져온 원본 성경 본문
+ * @returns 생성된 Quiz 객체 또는 실패 시 null
+ */
+const createFallbackQuiz = (topic: string, bibleVerse: string | null): Quiz | null => {
+  if (!bibleVerse) return null;
+
+  const parsedTopic = parseReference(topic);
+  if (!parsedTopic) return null;
+
+  const questions: FillInTheBlankQuestion[] = [];
+  const lines = bibleVerse.trim().split('\n');
+
+  for (const line of lines) {
+    const lineMatch = line.match(/^(\d+:\d+)\s(.+)/s);
+    if (!lineMatch) continue;
+
+    const verseRefStr = lineMatch[1];
+    const verseText = lineMatch[2].trim();
+
+    const eligibleWords = verseText.split(/\s+/).filter(w => w.length >= 2 && !/[.,;?!:'"()]/.test(w));
+    if (eligibleWords.length === 0) continue;
+
+    const answer = eligibleWords[Math.floor(Math.random() * eligibleWords.length)];
+    const answerIndex = verseText.indexOf(answer);
+    if (answerIndex === -1) continue;
+
+    const part1 = verseText.substring(0, answerIndex);
+    const part2 = verseText.substring(answerIndex + answer.length);
+
+    const question: FillInTheBlankQuestion = {
+      type: QuestionType.FILL_IN_THE_BLANK,
+      verseReference: `${parsedTopic.book} ${verseRefStr}`,
+      verseTextParts: [part1, '___', part2],
+      answers: [answer],
+    };
+    questions.push(question);
+  }
+
+  if (questions.length === 0) return null;
+
+  return {
+    topic: `${topic} (기본 퀴즈)`,
+    questions,
+  };
+};
+
 // AI에게 보내는 프롬프트에 현재 학습 중인 성경 본문 컨텍스트를 강제로 주입합니다.
 const constructEnforcedPrompt = (userMessage: string, topic: string, bibleVerse: string | null): string => {
   if (!bibleVerse) {
@@ -388,100 +437,75 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const testMatch = cleanedText.match(/\[START_TEST\]/);
   if (testMatch) {
     cleanedText = cleanedText.replace(testMatch[0], '').trim();
-    let quizJsonString = ''; // Declare here to be accessible in catch block
+    let quizJsonString = '';
     try {
       const jsonStartIndex = cleanedText.search(/[{\[]/);
       if (jsonStartIndex !== -1) {
+        const originalTextBeforeJson = cleanedText.substring(0, jsonStartIndex).trim();
         let rawJsonString = cleanedText.substring(jsonStartIndex);
         
         const lastBracket = rawJsonString.lastIndexOf(']');
         const lastBrace = rawJsonString.lastIndexOf('}');
         const jsonEndIndex = Math.max(lastBracket, lastBrace);
         
-        if (jsonEndIndex > -1) {
-            quizJsonString = rawJsonString.substring(0, jsonEndIndex + 1);
-        } else {
-            quizJsonString = rawJsonString;
-        }
+        quizJsonString = jsonEndIndex > -1 ? rawJsonString.substring(0, jsonEndIndex + 1) : rawJsonString;
 
         const parsedQuiz = JSON.parse(quizJsonString) as Quiz;
-
+        
         if (parsedQuiz && parsedQuiz.questions) {
-          const originalQuestionCount = parsedQuiz.questions.length;
-          console.log(`[Quiz Processing] AI generated ${originalQuestionCount} questions.`);
-          
-          parsedQuiz.questions.forEach(q => {
-            if (q.type === QuestionType.FILL_IN_THE_BLANK) {
-              const question = q as import('../types').FillInTheBlankQuestion;
-              if (question.verseTextParts.length === 1) {
-                const fullVerse = question.verseTextParts[0];
-                const parts = fullVerse.split(/(___|__)/g).map(p => (p === '__' || p === '___' ? '___' : p)).filter(p => p && p.length > 0);
-                question.verseTextParts = parts;
-              }
-              const existingBlanks = question.verseTextParts.filter(p => p === '___').length;
-              if (existingBlanks !== question.answers.length) {
-                const fullVerse = question.verseTextParts.join('');
-                const parts = fullVerse.split(/(___|__)/g).map(p => (p === '__' || p === '___' ? '___' : p)).filter(p => p && p.length > 0);
-                const newBlankCount = parts.filter(p => p === '___').length;
-                if (newBlankCount === question.answers.length) {
-                  question.verseTextParts = parts;
-                } else {
-                  console.warn("❗ FILL_IN_THE_BLANK 보정 실패", { original: question.verseTextParts, reconstructed: parts, answers: question.answers });
-                  question.verseTextParts = [fullVerse, ...Array(question.answers.length).fill('___')];
+            if (bibleVerse) {
+                const sessionRef = parseReference(topic);
+                if (sessionRef) {
+                    parsedQuiz.questions = parsedQuiz.questions.filter(q => {
+                        const questionRef = parseReference(q.verseReference);
+                        if (!questionRef || sessionRef.book !== questionRef.book || sessionRef.chapter !== questionRef.chapter) return false;
+                        if (!questionRef.verses.every(v => sessionRef.verses.includes(v))) return false;
+                        if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+                            const verseStringFromParts = q.verseTextParts.join('').replace(/___/g, '');
+                            if (!normalizeText(bibleVerse).includes(normalizeText(verseStringFromParts))) return false;
+                        }
+                        return true;
+                    });
                 }
-              }
             }
-          });
-          
-          if (bibleVerse) {
-              const sessionRef = parseReference(topic);
-              if (!sessionRef) {
-                  console.warn("❗ 세션 주제 파싱 실패:", topic);
-              } else {
-                  const questionsBeforeFilter = parsedQuiz.questions.length;
-                  parsedQuiz.questions = parsedQuiz.questions.filter(q => {
-                      const questionRef = parseReference(q.verseReference);
-                      if (!questionRef) {
-                          console.warn("❗ 퀴즈 구절 참조 파싱 실패:", q.verseReference);
-                          return false;
-                      }
+        }
 
-                      if (sessionRef.book !== questionRef.book) {
-                          console.warn("❗ 퀴즈 책 불일치", { expected: sessionRef.book, got: questionRef.book });
-                          return false;
-                      }
-                      if (sessionRef.chapter !== questionRef.chapter) {
-                          console.warn("❗ 퀴즈 장 불일치", { expected: sessionRef.chapter, got: questionRef.chapter });
-                          return false;
-                      }
-                      const isVerseSubset = questionRef.verses.every(v => sessionRef.verses.includes(v));
-                      if (!isVerseSubset) {
-                          console.warn("❗ 퀴즈 절 번호 불일치", { session: sessionRef.verses, question: questionRef.verses });
-                          return false;
-                      }
-
-                      if (q.type === QuestionType.FILL_IN_THE_BLANK) {
-                          const verseString = q.verseTextParts.join('').replace(/___/g, '');
-                          if (!normalizeText(bibleVerse).includes(normalizeText(verseString))) {
-                              console.warn("❗ 퀴즈 내용 불일치 (빈칸 채우기)", { expected: normalizeText(bibleVerse), got: normalizeText(verseString) });
-                              return false;
-                          }
-                      }
-                      return true;
-                  });
-                  const questionsAfterFilter = parsedQuiz.questions.length;
-                  console.log(`[Quiz Filtering] Before: ${questionsBeforeFilter}, After: ${questionsAfterFilter}`);
-              }
-          }
-        }         
-
-        result.quizStarted = parsedQuiz;
-        cleanedText = cleanedText.substring(0, jsonStartIndex).trim();
+        if (parsedQuiz.questions.length > 0) {
+            result.quizStarted = parsedQuiz;
+            cleanedText = originalTextBeforeJson;
+        } else {
+            console.warn("AI generated 0 valid questions. Generating fallback quiz.");
+            const fallbackQuiz = createFallbackQuiz(topic, bibleVerse);
+            if (fallbackQuiz) {
+                result.quizStarted = fallbackQuiz;
+                cleanedText = "AI가 생성한 퀴즈에 오류가 있어, 시스템이 생성한 기본 빈칸 채우기 퀴즈를 시작합니다.\n\n" + originalTextBeforeJson;
+            } else {
+                result.quizStarted = undefined;
+                cleanedText = "AI 퀴즈 생성에 실패했으며, 대체 퀴즈도 만들 수 없습니다. 대화로 돌아갑니다. 다시 시도해주세요.";
+            }
+        }
+      } else {
+        console.warn("[START_TEST] tag found, but no JSON object followed. Generating fallback quiz.");
+        const fallbackQuiz = createFallbackQuiz(topic, bibleVerse);
+        if (fallbackQuiz) {
+            result.quizStarted = fallbackQuiz;
+            cleanedText = "AI가 퀴즈 데이터를 생성하지 못해, 시스템이 생성한 기본 빈칸 채우기 퀴즈를 시작합니다.\n\n" + cleanedText;
+        } else {
+            result.quizStarted = undefined;
+            cleanedText = "AI 퀴즈 생성에 실패했으며, 대체 퀴즈도 만들 수 없습니다. 대화로 돌아갑니다. 다시 시도해주세요.";
+        }
       }
     } catch (e) {
-      const err = e instanceof Error ? e.message : String(e);
-      const detailedError = `퀴즈 데이터를 처리하는 중 오류가 발생했습니다. AI가 반환한 JSON 형식이 잘못되었을 가능성이 높습니다.\n\n오류: ${err}\n\nAI 응답:\n${quizJsonString}`;
-      setError(detailedError);
+      console.error("Error parsing AI quiz JSON. Generating fallback quiz.", e);
+      const fallbackQuiz = createFallbackQuiz(topic, bibleVerse);
+      if (fallbackQuiz) {
+          result.quizStarted = fallbackQuiz;
+          cleanedText = "AI가 생성한 퀴즈 형식에 오류가 있어, 시스템이 생성한 기본 빈칸 채우기 퀴즈를 시작합니다.";
+      } else {
+          const detailedError = `퀴즈 데이터를 처리하는 중 오류가 발생했습니다. 대체 퀴즈 생성에도 실패했습니다. 오류: ${e instanceof Error ? e.message : String(e)}`;
+          setError(detailedError);
+          cleanedText = "";
+      }
     }
   }
 
@@ -525,18 +549,14 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         const newHistory = [...chatHistory, newUserMessage, newModelMessage];
         setChatHistory(newHistory);
         
-        // Display the processed model message in the UI.
-        setMessages(prev => [...prev, { role: 'model', content: processed.cleanedText }]);
+        // Display the processed model message in the UI, if any text remains
+        if(processed.cleanedText) {
+          setMessages(prev => [...prev, { role: 'model', content: processed.cleanedText }]);
+        }
   
         if (processed.stepChangedTo) setCurrentStep(processed.stepChangedTo);
         if (processed.quizStarted) {
-            // AI가 생성한 퀴즈에 유효한 문제가 하나도 없으면 사용자에게 알립니다.
-            if (processed.quizStarted.questions.length === 0) {
-                const feedbackMsg = "AI가 생성한 퀴즈에 유효한 문제가 없어 대화로 돌아갑니다. 다시 시도해주세요.";
-                setMessages(prev => [...prev, { role: 'model', content: feedbackMsg }]);
-            } else {
-                setQuizData(processed.quizStarted);
-            }
+            setQuizData(processed.quizStarted);
         }
         if (processed.isComplete) setIsCompleted(true);
   
