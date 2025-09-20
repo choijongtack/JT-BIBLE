@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../types';
 import { supabase } from './supabaseClient';
 import { buildSystemInstruction } from './instructionTemplate';
+import { BIBLE_METADATA } from './bibleData';
 
 const PPLX_MODEL = 'llama-3-sonar-small-32k-online';
 const PROXY_FUNCTION_NAME = 'perplexity-proxy';
@@ -97,8 +98,15 @@ export const getStudyTopicForBook = async (book: string, apiKey: string): Promis
     }
 };
 
-export const getNextStudyTopic = async (currentTopic: string, apiKey: string): Promise<string> => {
-    const prompt = `현재 학습 주제는 '${currentTopic}'입니다. 이 구절 바로 다음에 이어지는, 내용상 자연스럽게 구분되는 다음 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
+export const getNextStudyTopic = async (currentTopic: string, apiKey: string, bookName: string): Promise<string> => {
+    const bookMeta = BIBLE_METADATA[bookName];
+    let prompt = `현재 학습 주제는 '${currentTopic}'입니다. 이 구절 바로 다음에 이어지는, 내용상 자연스럽게 구분되는 다음 단락(pericope)을 추천해주세요.`;
+
+    if (bookMeta) {
+        prompt += ` 참고로, '${bookName}'은 총 ${bookMeta.chapters}장으로 되어 있으며, 마지막 장은 ${bookMeta.versesInLastChapter}절까지 있습니다. 이 정보를 바탕으로 추천해주세요.`;
+    }
+    
+    prompt += ` 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
 
     try {
         const payload = {

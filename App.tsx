@@ -183,54 +183,76 @@ const App: React.FC = () => {
                 dispatch({ type: 'START_LOADING', payload: `'${savedSession.topic}' 학습을 다시 시작합니다...` });
                 sessionToStart = { ...savedSession, mode: newMode };
             } else {
-                if (savedSession?.isComplete) {
-                    const parsedTopic = parseReference(savedSession.topic);
-                    const bookMetadata = BIBLE_METADATA[book];
-                    const lastVerseOfTopic = parsedTopic?.verses[parsedTopic.verses.length - 1];
+                let nextTopic: string;
+                let bibleVerse: string | null;
+                
+                const isNextTopic = savedSession?.isComplete;
+                const topicToGet = isNextTopic ? savedSession.topic : book;
+                
+                if (isNextTopic) {
+                    const lastTopicRef = parseReference(topicToGet);
+                    const bookMeta = BIBLE_METADATA[book];
 
-                    if (parsedTopic && bookMetadata && parsedTopic.chapter === bookMetadata.chapters && lastVerseOfTopic === bookMetadata.versesInLastChapter) {
-                        const allBooks = [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS];
-                        const currentBookIndex = allBooks.indexOf(book);
-                        const nextBook = currentBookIndex !== -1 && currentBookIndex < allBooks.length - 1 ? allBooks[currentBookIndex + 1] : null;
-                        
-                        let message = `축하합니다! '${book}'의 학습을 모두 완료하셨습니다.`;
-                        if (nextBook) {
-                           message += `\n\n이어서 다음 책인 '${nextBook}' 학습을 시작하시겠습니까?`;
+                    if (lastTopicRef && bookMeta) {
+                        const lastVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
+                        if (lastTopicRef.chapter === bookMeta.chapters && lastVerse >= bookMeta.versesInLastChapter) {
+                            alert(`'${book}'의 학습을 모두 완료하셨습니다.`);
+                            dispatch({ type: 'GO_TO_IDLE' });
+                            return;
                         }
-                        
-                        if (window.confirm(message)) {
-                            if (nextBook) {
-                                // Start learning the next book recursively
-                                await handleStartLearning(nextBook, aiModel, apiKey, mode);
-                                return;
-                            }
-                        }
-                        // If user cancels or there's no next book, go to idle.
-                        dispatch({ type: 'GO_TO_IDLE' });
-                        return;
                     }
                 }
-
-                const topicToGet = savedSession?.isComplete ? savedSession.topic : book;
-                const isNextTopic = savedSession?.isComplete;
-
+                
                 dispatch({ type: 'START_LOADING', payload: `'${topicToGet}'${isNextTopic ? ' 다음' : '의 첫'} 주제를 찾는 중...` });
                 const newSelectedModel = aiModel || 'gemini';
 
-                let nextTopic: string;
                 if (newSelectedModel === 'perplexity' && apiKey) {
-                    nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, apiKey) : await getPerplexityStudyTopic(topicToGet, apiKey);
+                    nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, apiKey, book) : await getPerplexityStudyTopic(topicToGet, apiKey);
                 } else if (newSelectedModel === 'chatgpt') {
-                    nextTopic = isNextTopic ? await getNextChatGptStudyTopic(topicToGet) : await getChatGptStudyTopic(topicToGet);
+                    nextTopic = isNextTopic ? await getNextChatGptStudyTopic(topicToGet, book) : await getChatGptStudyTopic(topicToGet);
                 } else {
-                    nextTopic = isNextTopic ? await getNextGeminiStudyTopic(topicToGet) : await getGeminiStudyTopic(topicToGet);
+                    nextTopic = isNextTopic ? await getNextGeminiStudyTopic(topicToGet, book) : await getGeminiStudyTopic(topicToGet);
                 }
 
                 dispatch({ type: 'START_LOADING', payload: `'${nextTopic}' 본문을 불러오는 중...` });
-                const { text: bibleVerse } = await getBibleVerse(nextTopic);
+                const verseResult = await getBibleVerse(nextTopic);
+
+                if (verseResult.error) {
+                    console.warn(`AI가 제안한 토픽('${nextTopic}') 조회 실패. Fallback 로직 실행. 오류:`, verseResult.error);
+                    dispatch({ type: 'START_LOADING', payload: `AI 추천(${nextTopic})이 유효하지 않아 마지막 절을 직접 계산합니다...` });
+
+                    let correctedTopic: string | null = null;
+                    const lastTopicRef = parseReference(topicToGet);
+                    const bookMeta = BIBLE_METADATA[book];
+
+                    if (lastTopicRef && bookMeta && lastTopicRef.chapter === bookMeta.chapters) {
+                        const lastStudiedVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
+                        const finalVerseInBook = bookMeta.versesInLastChapter;
+                        
+                        if (lastStudiedVerse < finalVerseInBook) {
+                            const nextStart = lastStudiedVerse + 1;
+                            correctedTopic = `${book} ${lastTopicRef.chapter}:${nextStart}-${finalVerseInBook}`;
+                        }
+                    }
+                    
+                    if (!correctedTopic) {
+                        throw new Error(`AI가 잘못된 다음 주제('${nextTopic}')를 반환했으며, 시스템이 대체 주제를 생성하지 못했습니다.`);
+                    }
+
+                    nextTopic = correctedTopic;
+                    dispatch({ type: 'START_LOADING', payload: `'${nextTopic}' 본문을 다시 불러오는 중...` });
+                    const retryResult = await getBibleVerse(nextTopic);
+                    if (retryResult.error) {
+                        throw new Error(`대체 주제('${nextTopic}') 조회에 실패했습니다: ${retryResult.error}`);
+                    }
+                    bibleVerse = retryResult.text;
+
+                } else {
+                    bibleVerse = verseResult.text;
+                }
 
                 let encryptedApiKey: string | undefined = apiKey;
-                if (apiKey && newSelectedModel === 'perplexity') {
+                if (apiKey && aiModel === 'perplexity') {
                     if (!session?.access_token) throw new Error("API 키를 암호화하기 위한 인증 토큰을 찾을 수 없습니다.");
                     encryptedApiKey = await encrypt(apiKey, session.access_token);
                 }
@@ -239,9 +261,9 @@ const App: React.FC = () => {
                     topic: nextTopic,
                     currentStep: LearningStep.ANALYSIS,
                     messages: [],
-                    aiModel: newSelectedModel,
+                    aiModel: aiModel || 'gemini',
                     mode: newMode,
-                    apiKey: newSelectedModel === 'perplexity' ? encryptedApiKey : undefined,
+                    apiKey: aiModel === 'perplexity' ? encryptedApiKey : undefined,
                     bibleVerse: bibleVerse,
                     score: 0, quizData: null, currentQuestionIndex: 0
                 };
@@ -261,7 +283,12 @@ const App: React.FC = () => {
 
         const book = getBookFromTopic(activeSession.topic);
         const currentBookProgress = profile.progress?.[book] || { lastSession: activeSession, completedTopics: [] };
-        const completedTopicsSet = new Set(currentBookProgress.completedTopics).add(activeSession.topic);
+        
+        // FIX: Explicitly typed the Set as Set<string> to resolve a TypeScript inference
+        // error where `Array.from` would otherwise produce `unknown[]` instead of `string[]`.
+        // This ensures type safety when updating the user's progress.
+        const completedTopicsSet = new Set<string>(currentBookProgress.completedTopics);
+        completedTopicsSet.add(activeSession.topic);
 
         const sessionToSave: LearningSessionState = {
             ...activeSession, isComplete: true, messages: [], bibleVerse: null,
@@ -276,7 +303,7 @@ const App: React.FC = () => {
             return;
         }
 
-        setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
+        setProfile(prev => prev ? { ...prev, progress: result.after!, active_learning_session: null } : null);
         await saveActiveSession(null);
         dispatch({ type: 'FINISH_LEARNING', payload: { score, total, topic: activeSession.topic, debugInfo: result } });
 
@@ -299,7 +326,7 @@ const App: React.FC = () => {
             return;
         }
 
-        setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
+        setProfile(prev => prev ? { ...prev, progress: result.after!, active_learning_session: null } : null);
         await saveActiveSession(null);
 
         if (isSystemBack) {
@@ -308,6 +335,13 @@ const App: React.FC = () => {
             dispatch({ type: 'SAVE_AND_EXIT', payload: { topic: activeSession.topic, debugInfo: result } });
         }
     }, [activeSession, profile, setProfile]);
+
+    const handleExitLearning = useCallback(async () => {
+        if (profile?.id) {
+            await saveActiveSession(null);
+        }
+        dispatch({ type: 'GO_TO_IDLE' });
+    }, [profile?.id]);
     
     const handleStateChange = useCallback(async (newState: LearningSessionState) => {
         dispatch({ type: 'UPDATE_LEARNING_STATE', payload: newState });
@@ -375,9 +409,9 @@ const App: React.FC = () => {
                     savedSession={activeSession}
                     onStateChange={handleStateChange}
                     onFinish={handleFinishLearning}
-                    onBack={() => dispatch({ type: 'GO_TO_IDLE' })}
+                    onBack={handleExitLearning}
                     onSaveAndExit={() => saveCurrentSession(false)}
-                    onSkip={() => dispatch({ type: 'GO_TO_IDLE' })}
+                    onSkip={handleExitLearning}
                     onSystemBack={() => saveCurrentSession(true)}
                 />;
             case 'finished':
