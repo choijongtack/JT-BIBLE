@@ -10,9 +10,11 @@ interface QuizCardProps {
   onSubmit: (answers: string[]) => boolean;
   onNext: () => void;
   onSkip: () => void;
+  aiFeedback?: string | null;
+  isEvaluating?: boolean;
 }
 
-const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQuestions, onSubmit, onNext, onSkip }) => {
+const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQuestions, onSubmit, onNext, onSkip, aiFeedback, isEvaluating }) => {
   const [userAnswers, setUserAnswers] = useState<string[]>([]);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
@@ -114,7 +116,28 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
 
   const renderFeedback = () => {
     if (!isSubmitted) return null;
-    const correctAnswers = question.type === QuestionType.FILL_IN_THE_BLANK ? question.answers.join(', ') : question.answer;
+
+    if (question.type === QuestionType.QUESTION_ANSWER) {
+      if (isEvaluating) {
+        return (
+          <div className="mt-4 p-4 rounded-lg bg-slate-700/50 border border-slate-600 flex items-center justify-center gap-3">
+            <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-slate-300">AI가 답변을 평가 중입니다...</p>
+          </div>
+        );
+      }
+      if (aiFeedback) {
+        return (
+          <div className="mt-4 p-4 rounded-lg bg-slate-900/50 border border-blue-700 flex flex-col gap-2">
+            <h4 className="text-lg font-bold text-blue-300">AI 평가 피드백</h4>
+            <p className="text-slate-200 whitespace-pre-wrap leading-relaxed">{aiFeedback}</p>
+          </div>
+        );
+      }
+      return null;
+    }
+
+    const correctAnswers = question.answers.join(', ');
 
     if (isCorrect) {
       return (
@@ -137,6 +160,11 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
   };
 
   const canSubmit = userAnswers.length > 0 && userAnswers.every(answer => answer.trim() !== '');
+  
+  const showNextButton = isSubmitted && (
+    question.type === QuestionType.FILL_IN_THE_BLANK || 
+    (question.type === QuestionType.QUESTION_ANSWER && !!aiFeedback && !isEvaluating)
+  );
 
   return (
     <div className="w-full max-w-3xl mx-auto bg-slate-800/50 p-6 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
@@ -163,19 +191,21 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
           {!isSubmitted ? (
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={!canSubmit || isEvaluating}
               className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
             >
-              정답 확인
+              {question.type === QuestionType.QUESTION_ANSWER ? '평가 요청' : '정답 확인'}
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={onNext}
-              className="px-6 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors"
-            >
-              {questionNumber === totalQuestions ? '결과 보기' : '다음 문제'}
-            </button>
+            showNextButton && (
+              <button
+                type="button"
+                onClick={onNext}
+                className="px-6 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors"
+              >
+                {questionNumber === totalQuestions ? '결과 보기' : '다음 문제'}
+              </button>
+            )
           )}
         </div>
       </form>

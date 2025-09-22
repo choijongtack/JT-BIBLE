@@ -16,6 +16,7 @@ export interface ProcessedResponse {
   quizStarted?: Quiz;
   verseExtracted?: string;
   isComplete?: boolean;
+  evaluationFeedback?: string;
 }
 
 interface UseAIConversationProps {
@@ -38,6 +39,12 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
         let cleanedText = text;
         const result: ProcessedResponse = { cleanedText: '' };
       
+        const evalMatch = cleanedText.match(/\[EVALUATION_RESPONSE\]([\s\S]*)/);
+        if (evalMatch && evalMatch[1]) {
+          result.evaluationFeedback = evalMatch[1].trim();
+          cleanedText = cleanedText.replace(evalMatch[0], '').trim();
+        }
+
         const verseMatch = cleanedText.match(/\[BIBLE_VERSE\]([\s\S]*?)\[\/BIBLE_VERSE\]/);
         if (verseMatch && verseMatch[1]) {
           const verse = verseMatch[1].trim();
@@ -139,7 +146,10 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
         return result;
       }, [bibleVerse, topic]);
 
-    const sendMessage = useCallback(async (messageContent: string) => {
+    const sendMessage = useCallback(async (
+        messageContent: string,
+        options: { enforcePassageOnly: boolean } = { enforcePassageOnly: false }
+    ) => {
         if (!messageContent.trim() || isLoading) return;
 
         const newUserMessage: ChatMessage = { role: 'user', content: messageContent };
@@ -149,7 +159,7 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
         setProcessedResponse(null);
     
         try {
-            const finalApiMessage = constructEnforcedPrompt(messageContent, topic, bibleVerse);
+            const finalApiMessage = constructEnforcedPrompt(messageContent, topic, bibleVerse, options);
             let responseText: string;
             
             if (aiModel === 'perplexity' && decryptedApiKey) {

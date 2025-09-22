@@ -38,6 +38,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const [currentStep, setCurrentStep] = useState<LearningStep>(savedSession.currentStep);
   const [userInput, setUserInput] = useState('');
   const [decryptedApiKey, setDecryptedApiKey] = useState<string | undefined>(undefined);
+  const [aiFeedback, setAiFeedback] = useState<string | null>(null);
 
   const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(savedSession.currentQuestionIndex);
@@ -75,6 +76,9 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       if (processedResponse.stepChangedTo) setCurrentStep(processedResponse.stepChangedTo);
       if (processedResponse.quizStarted) setQuizData(processedResponse.quizStarted);
       if (processedResponse.isComplete) setIsCompleted(true);
+      if (processedResponse.evaluationFeedback) {
+        setAiFeedback(processedResponse.evaluationFeedback);
+      }
     }
   }, [processedResponse, setBibleVerse, setBibleVerseSource]);
   
@@ -119,7 +123,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
           setMessages(cleanedMessages);
       } else {
           // Start a new conversation
-          sendMessage("학습을 시작해주세요.");
+          sendMessage("학습을 시작해주세요.", { enforcePassageOnly: true });
       }
     }
   }, [isLoading, isFetchingVerse, bibleVerse, verseFetchError, sendMessage, savedSession.messages, setMessages]);
@@ -163,13 +167,15 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!userInput.trim()) return;
-    sendMessage(userInput);
+    // User-submitted questions should allow for flexible, expanded answers.
+    sendMessage(userInput, { enforcePassageOnly: false });
     setUserInput('');
   };
 
   const handleForceStepChange = (step: LearningStep) => {
     const message = `[사용자 액션] '${step}' 단계로 강제 이동합니다.`;
-    sendMessage(message);
+    // System-driven commands must strictly adhere to the current passage.
+    sendMessage(message, { enforcePassageOnly: true });
   };
   
   const handleAdvanceStepRequest = () => {
@@ -185,31 +191,37 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         ? `이전 단계 학습이 완료되었습니다. 이제 시험을 시작하겠습니다. 시스템 지침에 따라 '${topic}' 본문에 대한 퀴즈 JSON을 생성해주세요.\n\n퀴즈의 모든 내용은 반드시 아래 제공된 성경 본문만을 사용하여 생성해야 합니다. 다른 구절을 참조하면 생성된 퀴즈가 거부됩니다.\n\n[퀴즈 출제용 본문: ${topic}]\n---\n${bibleVerse}\n---`
         : `이전 단계 학습이 완료되었습니다. 이제 시험을 시작하겠습니다. 시스템 지침에 따라 '${topic}' 본문에 대한 퀴즈 JSON을 생성해주세요.`;
     }
-    sendMessage(message);
+    // System-driven commands must strictly adhere to the current passage.
+    sendMessage(message, { enforcePassageOnly: true });
   };
   
   const handleQuizSubmit = useCallback((userAnswers: string[]): boolean => {
     const currentQuestion = quizData?.questions[currentQuestionIndex];
     if (!currentQuestion) return false;
 
-    let isCorrect = false;
     if (currentQuestion.type === QuestionType.FILL_IN_THE_BLANK) {
-      isCorrect = userAnswers.every((ans, i) => isAnswerCorrect(ans, currentQuestion.answers[i]));
+      const isCorrect = userAnswers.every((ans, i) => isAnswerCorrect(ans, currentQuestion.answers[i]));
+      if (isCorrect) setScore(prev => prev + 1);
+      return isCorrect;
     } else if (currentQuestion.type === QuestionType.QUESTION_ANSWER) {
-      isCorrect = isAnswerCorrect(userAnswers[0], currentQuestion.answer);
+      setAiFeedback(null);
+      sendMessage(`[시스템 액션] 다음 답변을 평가해주세요: ${userAnswers[0]}`, { enforcePassageOnly: false });
+      return false; // 정답 여부를 즉시 알 수 없으므로 false를 반환합니다.
     }
 
-    if (isCorrect) setScore(prev => prev + 1);
-    return isCorrect;
-  }, [quizData, currentQuestionIndex]);
+    return false;
+  }, [quizData, currentQuestionIndex, sendMessage, setScore]);
 
   const handleQuizNext = useCallback(() => {
     if (quizData && currentQuestionIndex < quizData.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
+      setAiFeedback(null);
     } else {
-      onFinish(score, quizData?.questions.length || 0);
+      // 퀴즈의 마지막 문제입니다. isCompleted를 true로 설정하여
+      // '학습 완료' 버튼이 표시되도록 합니다.
+      setIsCompleted(true);
     }
-  }, [quizData, currentQuestionIndex, score, onFinish]);
+  }, [quizData, currentQuestionIndex]);
 
   // Render Logic
   if (error) {
@@ -224,11 +236,20 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   
   const currentQuestion = quizData?.questions?.[currentQuestionIndex];
 
-  if (quizData) {
+  if (quizData && !isCompleted) {
     return (
       <div className="w-full max-w-7xl mx-auto p-2 sm:p-6 flex items-center justify-center">
         {currentQuestion ? (
-            <QuizCard question={currentQuestion} questionNumber={currentQuestionIndex + 1} totalQuestions={quizData.questions.length} onSubmit={handleQuizSubmit} onNext={handleQuizNext} onSkip={onSkip} />
+            <QuizCard 
+                question={currentQuestion} 
+                questionNumber={currentQuestionIndex + 1} 
+                totalQuestions={quizData.questions.length} 
+                onSubmit={handleQuizSubmit} 
+                onNext={handleQuizNext} 
+                onSkip={onSkip}
+                aiFeedback={aiFeedback}
+                isEvaluating={isLoading}
+            />
         ) : (
             <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 flex flex-col items-center justify-center text-center bg-slate-800/50 rounded-2xl shadow-inner border border-red-700">
                 <h2 className="text-2xl font-bold text-red-400 mb-4">퀴즈 표시 오류</h2>

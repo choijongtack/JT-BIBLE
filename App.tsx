@@ -18,7 +18,7 @@ import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getN
 import { updateUserProgress, saveActiveSession } from './services/userDataService';
 import { encrypt } from './services/encryptionService';
 import type { BookProgress, AiModel } from './types';
-import { getBibleVerse } from './services/bibleService';
+import { getBibleVerse, getLastVerseInChapter } from './services/bibleService';
 import { useProfileSession } from './hooks/useProfileSession';
 
 // A robust function to extract the correct Bible book name from a topic string.
@@ -219,28 +219,47 @@ const App: React.FC = () => {
 
                 if (verseResult.error) {
                     console.warn(`AI가 제안한 토픽('${nextTopic}') 조회 실패. Fallback 로직 실행. 오류:`, verseResult.error);
-                    dispatch({ type: 'START_LOADING', payload: `AI 추천(${nextTopic})이 유효하지 않아 마지막 절을 직접 계산합니다...` });
+                    dispatch({ type: 'START_LOADING', payload: `AI 추천(${nextTopic})이 유효하지 않아 다음 주제를 직접 계산합니다...` });
 
                     let correctedTopic: string | null = null;
                     const lastTopicRef = parseReference(topicToGet);
                     const bookMeta = BIBLE_METADATA[book];
+                    const maxStep = 5;
 
-                    if (lastTopicRef && bookMeta && lastTopicRef.chapter === bookMeta.chapters) {
+                    if (lastTopicRef && bookMeta) {
+                        const lastStudiedChapter = lastTopicRef.chapter;
                         const lastStudiedVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
-                        const finalVerseInBook = bookMeta.versesInLastChapter;
-                        
-                        if (lastStudiedVerse < finalVerseInBook) {
+
+                        const { lastVerse: finalVerseInChapter, error: verseError } = await getLastVerseInChapter(book, lastStudiedChapter);
+
+                        if (verseError || finalVerseInChapter === null) {
+                            throw new Error(`다음 주제를 계산하지 못했습니다: ${book} ${lastStudiedChapter}의 마지막 절을 찾을 수 없습니다. 오류: ${verseError}`);
+                        }
+
+                        if (lastStudiedVerse < finalVerseInChapter) {
+                            // We are in the same chapter
                             const nextStart = lastStudiedVerse + 1;
-                            correctedTopic = `${book} ${lastTopicRef.chapter}:${nextStart}-${finalVerseInBook}`;
+                            const nextEnd = Math.min(nextStart + maxStep - 1, finalVerseInChapter);
+                            const range = nextStart === nextEnd ? `${nextStart}` : `${nextStart}-${nextEnd}`;
+                            correctedTopic = `${book} ${lastStudiedChapter}:${range}`;
+                        } else if (lastStudiedChapter < bookMeta.chapters) {
+                            // We need to move to the next chapter
+                            const nextChapter = lastStudiedChapter + 1;
+                            correctedTopic = `${book} ${nextChapter}:1-${maxStep}`;
+                        } else {
+                            // This is the last verse of the last chapter. The book is complete.
+                            alert(`'${book}'의 학습을 모두 완료하셨습니다.`);
+                            dispatch({ type: 'GO_TO_IDLE' });
+                            return; // exit the function
                         }
                     }
-                    
+
                     if (!correctedTopic) {
                         throw new Error(`AI가 잘못된 다음 주제('${nextTopic}')를 반환했으며, 시스템이 대체 주제를 생성하지 못했습니다.`);
                     }
 
                     nextTopic = correctedTopic;
-                    dispatch({ type: 'START_LOADING', payload: `'${nextTopic}' 본문을 다시 불러오는 중...` });
+                    dispatch({ type: 'START_LOADING', payload: `대체 주제 '${nextTopic}' 본문을 불러오는 중...` });
                     const retryResult = await getBibleVerse(nextTopic);
                     if (retryResult.error) {
                         throw new Error(`대체 주제('${nextTopic}') 조회에 실패했습니다: ${retryResult.error}`);

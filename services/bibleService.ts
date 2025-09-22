@@ -49,3 +49,28 @@ export async function getBibleVerse(reference: string): Promise<BibleVerseResult
     return { text: null, error: err instanceof Error ? err.message : "Unknown error" };
   }
 }
+
+export async function getLastVerseInChapter(book: string, chapter: number): Promise<{ lastVerse: number | null; error: string | null; }> {
+    try {
+        const { data, error } = await supabase
+            .from('verses')
+            .select('verse')
+            .eq('book', book)
+            .eq('chapter', chapter)
+            .order('verse', { ascending: false })
+            .limit(1);
+        
+        if (error) {
+            return { lastVerse: null, error: error.message };
+        }
+        
+        if (!data || data.length === 0) {
+            return { lastVerse: null, error: `No verses found for ${book} chapter ${chapter}.` };
+        }
+
+        return { lastVerse: data[0].verse, error: null };
+
+    } catch (err) {
+        return { lastVerse: null, error: err instanceof Error ? err.message : "Unknown error" };
+    }
+}
