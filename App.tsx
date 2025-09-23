@@ -7,7 +7,6 @@ import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
 import WelcomeScreen from './components/WelcomeScreen';
 import ResultsScreen from './components/ResultsScreen';
-import ResumeSessionPrompt from './components/ResumeSessionPrompt';
 import AwaitingConfirmationScreen from './components/AwaitingConfirmationScreen';
 import ProfileErrorScreen from './components/ProfileErrorScreen';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
@@ -15,7 +14,7 @@ import ProgressDebugPanel from './components/ProgressDebugPanel';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic, generatePrayerForTopic as generateGeminiPrayer } from './services/geminiService';
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic, generatePrayerForTopic as generatePerplexityPrayer } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic, generatePrayerForTopic as generateChatGptPrayer } from './services/chatgptService';
-import { updateUserProgress, saveActiveSession } from './services/userDataService';
+import { updateUserProgress } from './services/userDataService';
 import type { BookProgress, AiModel } from './types';
 import { getBibleVerse, getLastVerseInChapter } from './services/bibleService';
 import { useProfileSession } from './hooks/useProfileSession';
@@ -103,7 +102,7 @@ interface AppState {
 type AppAction =
     | { type: 'SET_AUTH_STATUS'; payload: AppStatus }
     | { type: 'SET_AUTH_ERROR'; payload: string | null }
-    | { type: 'LOGIN_SUCCESS'; payload: { activeSession: LearningSessionState | null } }
+    | { type: 'LOGIN_SUCCESS' }
     | { type: 'START_LOADING'; payload: string }
     | { type: 'SET_ERROR'; payload: string | null }
     | { type: 'START_LEARNING'; payload: LearningSessionState }
@@ -111,8 +110,6 @@ type AppAction =
     | { type: 'FINISH_LEARNING'; payload: { score: number; total: number; topic: string; prayerText: string | null; debugInfo: any } }
     | { type: 'SAVE_AND_EXIT'; payload: { topic: string; debugInfo: any } }
     | { type: 'GO_TO_IDLE' }
-    | { type: 'RESUME_SESSION' }
-    | { type: 'DISCARD_SESSION' }
     | { type: 'OPEN_DELETE_MODAL' }
     | { type: 'CLOSE_DELETE_MODAL' }
     | { type: 'OPEN_COMPLETED_MODAL'; payload: string }
@@ -138,8 +135,8 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         case 'LOGIN_SUCCESS':
             return {
                 ...state,
-                activeSession: action.payload.activeSession,
-                status: action.payload.activeSession ? 'session-prompt' : 'idle',
+                activeSession: null,
+                status: 'idle',
             };
         case 'START_LOADING':
             return { ...state, status: 'loading', loadingMessage: action.payload, error: null };
@@ -167,10 +164,6 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
             };
         case 'GO_TO_IDLE':
             return { ...state, status: 'idle', activeSession: null, error: null, progressDebugInfo: null };
-        case 'RESUME_SESSION':
-            return { ...state, status: 'learning' };
-        case 'DISCARD_SESSION':
-            return { ...state, status: 'idle', activeSession: null };
         case 'OPEN_DELETE_MODAL':
             return { ...state, isDeleteConfirmOpen: true };
         case 'CLOSE_DELETE_MODAL':
@@ -207,7 +200,7 @@ const App: React.FC = () => {
             // When authenticated, the LOGIN_SUCCESS action determines the next app state ('idle' or 'session-prompt').
             // We don't dispatch SET_AUTH_STATUS directly.
             if (profile) {
-                dispatch({ type: 'LOGIN_SUCCESS', payload: { activeSession: profile.active_learning_session } });
+                dispatch({ type: 'LOGIN_SUCCESS' });
             }
         } else if (authStatus === 'unauthenticated') {
             // Map 'unauthenticated' from the auth hook to the 'login' screen state.
@@ -390,8 +383,7 @@ const App: React.FC = () => {
             return;
         }
 
-        setProfile(prev => prev ? { ...prev, progress: result.after!, active_learning_session: null } : null);
-        await saveActiveSession(null);
+        setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
         dispatch({ type: 'FINISH_LEARNING', payload: { score, total, topic: activeSession.topic, prayerText, debugInfo: result } });
 
     }, [activeSession, profile, setProfile]);
@@ -413,8 +405,7 @@ const App: React.FC = () => {
             return;
         }
 
-        setProfile(prev => prev ? { ...prev, progress: result.after!, active_learning_session: null } : null);
-        await saveActiveSession(null);
+        setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
 
         if (isSystemBack) {
             dispatch({ type: 'GO_TO_IDLE' });
@@ -424,15 +415,11 @@ const App: React.FC = () => {
     }, [activeSession, profile, setProfile]);
 
     const handleExitLearning = useCallback(async () => {
-        if (profile?.id) {
-            await saveActiveSession(null);
-        }
         dispatch({ type: 'GO_TO_IDLE' });
     }, [profile?.id]);
     
     const handleStateChange = useCallback(async (newState: LearningSessionState) => {
         dispatch({ type: 'UPDATE_LEARNING_STATE', payload: newState });
-        if (profile?.id) await saveActiveSession(newState);
     }, [profile?.id]);
 
     const handleGptKeySaved = useCallback(() => {
@@ -448,11 +435,6 @@ const App: React.FC = () => {
             return { ...prev, perplexity_api_key: 'key_saved_placeholder' };
         });
     }, [setProfile]);
-
-    const handleDiscard = useCallback(() => {
-        if(profile?.id) saveActiveSession(null);
-        dispatch({ type: 'DISCARD_SESSION' });
-    }, [profile?.id]);
 
     const executeDelete = useCallback(async () => {
         dispatch({ type: 'CLOSE_DELETE_MODAL' });
@@ -495,12 +477,6 @@ const App: React.FC = () => {
                         onPerplexityKeySaved={handlePerplexityKeySaved}
                     />
                 );
-            case 'session-prompt':
-                if (!activeSession) {
-                    dispatch({ type: 'GO_TO_IDLE' });
-                    return null;
-                }
-                return <ResumeSessionPrompt session={activeSession} onResume={() => dispatch({ type: 'RESUME_SESSION' })} onDiscard={handleDiscard} />;
             case 'learning':
                 if (!activeSession) {
                      dispatch({ type: 'GO_TO_IDLE' });

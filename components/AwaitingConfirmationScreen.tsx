@@ -14,7 +14,7 @@ const AwaitingConfirmationScreen: React.FC<AwaitingConfirmationScreenProps> = ({
             onClick={onBackToLogin}
             className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all"
         >
-            로그인 화면으로 돌아가기
+            확인
         </button>
     </div>
 );

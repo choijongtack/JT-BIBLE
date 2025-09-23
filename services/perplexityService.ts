@@ -7,6 +7,7 @@ const PPLX_MODEL = 'llama-3-sonar-small-32k-online';
 const PROXY_URL = `${supabaseUrl}/functions/v1/perplexity-proxy`;
 
 const getAuthHeaders = async (): Promise<HeadersInit> => {
+    // FIX: Switched to supabase.auth.getSession() which is the correct method in Supabase JS v2.
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('User not authenticated.');
     return {

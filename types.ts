@@ -26,7 +26,7 @@ export interface Quiz {
   questions: QuizQuestion[];
 }
 
-export type AppStatus = 'login' | 'idle' | 'loading' | 'learning' | 'finished' | 'error' | 'session-prompt' | 'awaiting-confirmation' | 'profile_error';
+export type AppStatus = 'login' | 'idle' | 'loading' | 'learning' | 'finished' | 'error' | 'awaiting-confirmation' | 'profile_error';
 
 export type ChatMessage = {
   role: 'user' | 'model';
@@ -62,7 +62,6 @@ export interface Profile {
     id: string;
     email?: string;
     progress: UserProgress;
-    active_learning_session: LearningSessionState | null;
     chatgpt_api_key?: string;
     perplexity_api_key?: string;
 }

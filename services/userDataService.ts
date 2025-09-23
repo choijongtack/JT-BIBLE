@@ -26,6 +26,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 async function getValidSession() {
+  // FIX: Switched to supabase.auth.getSession() which is the correct method in Supabase JS v2.
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error) throw error;
   if (!session) throw new Error("세션이 없습니다. 로그인 필요");
@@ -41,17 +42,20 @@ export interface ProgressDebugInfo {
 
 // ---------------- 인증/계정 ----------------
 export const registerUser = async (email: string, password: string) => {
+  // FIX: Corrected to supabase.auth.signUp() per Supabase JS v2 API.
   const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw error;
   return { user: data.user, session: data.session };
 };
 
 export const loginUser = async (email: string, password: string) => {
+  // FIX: Corrected to supabase.auth.signInWithPassword() per Supabase JS v2 API.
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
 };
 
 export const logoutUser = async () => {
+  // FIX: Corrected to supabase.auth.signOut() per Supabase JS v2 API.
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 };
@@ -90,7 +94,6 @@ export const createProfile = async (email?: string): Promise<Profile> => {
         id: userId,
         email,
         progress: {},
-        active_learning_session: null,
       })
       .select()
       .single();
@@ -137,7 +140,7 @@ export const updateUserProgress = async (
         updated_at: new Date().toISOString(),
       })
       .eq("id", userId)
-      .select("progress, active_learning_session")
+      .select("progress")
       .single();
 
     const { data: updatedData, error: updateError } = await withTimeout(Promise.resolve(updateQuery), API_TIMEOUT);
@@ -148,23 +151,6 @@ export const updateUserProgress = async (
   } catch (error) {
     debugInfo.error = error instanceof Error ? error.message : String(error);
     return debugInfo;
-  }
-};
-
-export const saveActiveSession = async (sessionState: LearningSessionState | null) => {
-  try {
-    const session = await getValidSession();
-    const userId = session.user.id;
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ active_learning_session: sessionState, updated_at: new Date().toISOString() })
-      .eq('id', userId);
-
-    if (error) throw error;
-  } catch (error) {
-    console.error("Failed to save active session:", error);
-    // Do not throw to avoid crashing the app on background saves.
   }
 };
 

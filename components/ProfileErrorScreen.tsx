@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 const RLSInstructions: React.FC = () => {
-    const [isOpen, setIsOpen] = useState(true);
+    const [isOpen, setIsOpen] = useState(false); // RLS 가이드를 기본적으로 닫아둡니다.
     const codeSnippet = `
 -- 1. "profiles" 테이블에 RLS 활성화
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -26,7 +26,7 @@ WITH CHECK (auth.uid() = id);
     return (
         <div className="text-left mt-6 border-t border-slate-700 pt-6">
             <button onClick={() => setIsOpen(!isOpen)} className="w-full flex justify-between items-center text-lg font-semibold text-slate-200 hover:text-white transition-colors">
-                <span>솔루션: Supabase RLS 정책 설정하기</span>
+                <span>Supabase RLS 정책 설정 가이드 (개발자용)</span>
                 <span className="transform transition-transform">{isOpen ? '▲' : '▼'}</span>
             </button>
             {isOpen && (
@@ -63,20 +63,30 @@ const ProfileErrorScreen: React.FC<ProfileErrorScreenProps> = ({ error, onLogout
 
     return (
         <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-2xl mx-auto">
-            <h2 className="text-3xl font-bold text-red-400 mb-4">프로필 로딩 실패</h2>
-            <pre className="text-slate-300 text-left bg-slate-900/50 p-4 rounded-md font-mono text-sm mb-6 whitespace-pre-wrap">{error}</pre>
-            <p className="text-slate-400 text-sm mb-6">
-                {isRLSError
-                    ? "아래 지침에 따라 문제를 해결한 후 페이지를 새로고침해주세요."
-                    : "위의 문제를 해결한 후, 페이지를 새로고침하여 다시 시도해주세요. 또는 로그아웃할 수 있습니다."
-                }
-            </p>
+            <h2 className="text-3xl font-bold text-red-400 mb-4">
+                {isRLSError ? "인증 문제 발생" : "프로필 로딩 실패"}
+            </h2>
+
+            {isRLSError ? (
+                <p className="text-slate-300 text-lg mb-8">
+                    가입자 인증에 문제가 발생하였습니다. 재로그인하여 주시길 바랍니다.
+                </p>
+            ) : (
+                <>
+                    <pre className="text-slate-300 text-left bg-slate-900/50 p-4 rounded-md font-mono text-sm mb-6 whitespace-pre-wrap">{error}</pre>
+                    <p className="text-slate-400 text-sm mb-6">
+                        위의 문제를 해결한 후, 페이지를 새로고침하여 다시 시도해주세요. 또는 로그아웃할 수 있습니다.
+                    </p>
+                </>
+            )}
+
             <button
                 onClick={onLogout}
                 className="w-full px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all"
             >
-                로그아웃
+                {isRLSError ? "확인" : "로그아웃"}
             </button>
+            
             {isRLSError && <RLSInstructions />}
         </div>
     );

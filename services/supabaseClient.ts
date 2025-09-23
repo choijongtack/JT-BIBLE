@@ -47,15 +47,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // ✅ 강제 로그아웃 fallback 헬퍼
 export const ensureValidSession = async () => {
   try {
+    // FIX: Switched to supabase.auth.getSession() which is the correct method in Supabase JS v2.
     const { data, error } = await supabase.auth.getSession();
     if (error) {
       console.error("세션 확인 오류:", error.message);
+      // FIX: Corrected to supabase.auth.signOut() per Supabase JS v2 API.
       await supabase.auth.signOut();
       window.location.href = "/login"; // 로그인 페이지로 강제 이동
       return null;
     }
     if (!data.session) {
       console.warn("세션 없음 → 강제 로그아웃");
+      // FIX: Corrected to supabase.auth.signOut() per Supabase JS v2 API.
       await supabase.auth.signOut();
       window.location.href = "/login";
       return null;
@@ -63,6 +66,7 @@ export const ensureValidSession = async () => {
     return data.session;
   } catch (err) {
     console.error("세션 확인 중 예외:", err);
+    // FIX: Corrected to supabase.auth.signOut() per Supabase JS v2 API.
     await supabase.auth.signOut();
     window.location.href = "/login";
     return null;

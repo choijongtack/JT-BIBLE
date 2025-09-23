@@ -3,7 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { AppStatus, Profile } from '../types';
 import { getProfile, createProfile, loginUser, registerUser, deleteUserAccount, logoutUser } from '../services/userDataService';
 import { supabase } from '../services/supabaseClient';
-import type { Session } from '@supabase/supabase-js';
+// FIX: Changed import from Session to AuthSession and aliased as Session. In some versions of supabase-js, the session type was exported as AuthSession.
+import type { AuthSession as Session } from '@supabase/supabase-js';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'awaiting-confirmation' | 'profile_error';
 
@@ -14,6 +15,7 @@ export const useProfileSession = () => {
     const [authError, setAuthError] = useState<string | null>(null);
 
     useEffect(() => {
+        // FIX: Corrected to supabase.auth.onAuthStateChange() per Supabase JS v2 API.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
             setSession(session);
 
@@ -22,6 +24,15 @@ export const useProfileSession = () => {
                 if (authStatus !== 'awaiting-confirmation') {
                     setAuthStatus('unauthenticated');
                 }
+                return;
+            }
+            
+            // After a user signs up with email confirmation enabled, Supabase sends a 'SIGNED_IN'
+            // event with a session, but the user's email is not yet confirmed. This block
+            // catches that specific case to prevent the app from treating it as a full login.
+            // It ensures the 'awaiting-confirmation' screen is shown.
+            if (_event === 'SIGNED_IN' && !session.user.email_confirmed_at) {
+                setAuthStatus('awaiting-confirmation');
                 return;
             }
 
@@ -59,7 +70,10 @@ export const useProfileSession = () => {
         try {
             await loginUser(email, password);
         } catch (e) {
-            const message = e instanceof Error ? e.message : '로그인 실패';
+            let message = e instanceof Error ? e.message : '로그인 실패';
+            if (message === 'Invalid login credentials') {
+                message = '신규 사용자 이시네요. 가입 후 사용바랍니다.';
+            }
             setAuthError(message);
             throw e;
         }

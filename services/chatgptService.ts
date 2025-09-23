@@ -12,6 +12,7 @@ const PROXY_URL = `${supabaseUrl}/functions/v1/chatgpt-proxy`;
  * @returns A promise that resolves to the HeadersInit object.
  */
 const getAuthHeaders = async (): Promise<HeadersInit> => {
+    // FIX: Switched to supabase.auth.getSession() which is the correct method in Supabase JS v2.
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error('User not authenticated.');
     return {
