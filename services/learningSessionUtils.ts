@@ -2,8 +2,31 @@ import type { Quiz, FillInTheBlankQuestion } from '../types';
 import { QuestionType } from '../types';
 import { parseReference } from './bibleUtils';
 
+// Heuristics-based Fallback Quiz Generation
+// This version aims to select more meaningful words for blanks compared to pure random selection.
+
+// 1. Define Korean stop words (불용어). These are common function words that are
+//    unlikely to be core concepts for a fill-in-the-blank quiz.
+const KOREAN_STOP_WORDS = [
+  // Particles (조사)
+  '은', '는', '이', '가', '을', '를', '의', '에', '에게', '께', '께서', '에서',
+  '으로', '로', '와', '과', '보다', '처럼', '같이', '만큼', '만', '도', '뿐',
+  '부터', '까지', '라도', '이나', '나',
+  // Conjunctions (접속사)
+  '그리고', '그러나', '그래서', '하지만', '또는', '및', '하고',
+  // Pronouns/Determiners (대명사/관형사)
+  '그', '저', '이것', '저것', '그것', '무엇', '누구',
+  '모든', '각각', '한', '두', '세',
+  // Common verbs/adjectives (ending forms) that are less likely to be keywords
+  '있는', '없는',
+  '있으니', '있고', '있으며', '있으매', '있었더라', '있느니라', '있으리라',
+  '하시니', '하시고', '하였더라', '하리니', '하매', '하되',
+];
+
+
 /**
  * AI가 유효한 퀴즈를 생성하지 못했을 때 DB 기반의 대체 퀴즈를 생성합니다.
+ * 이 함수는 핵심 단어를 선택하기 위해 휴리스틱(경험적 규칙)을 사용합니다.
  * @param topic 현재 학습 주제 (예: "창세기 1:1-5")
  * @param bibleVerse DB에서 가져온 원본 성경 본문
  * @returns 생성된 Quiz 객체 또는 실패 시 null
@@ -23,22 +46,54 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
 
     const verseRefStr = lineMatch[1];
     const verseText = lineMatch[2].trim();
+    const originalWords = verseText.split(/\s+/);
 
-    const eligibleWords = verseText.split(/\s+/).filter(w => w.length >= 2 && !/[.,;?!:'"()]/.test(w));
-    if (eligibleWords.length === 0) continue;
+    // 2. Filter for eligible words based on heuristics.
+    let eligibleWords = originalWords
+      .map(word => ({
+          original: word,
+          // For analysis, use a clean version without punctuation.
+          clean: word.replace(/[.,;?!:'"()]/g, ''),
+      }))
+      .filter(({ clean }) => 
+        clean.length >= 2 && // Rule: Must be at least 2 characters long.
+        !/^\d+$/.test(clean) && // Rule: Cannot be purely a number.
+        !KOREAN_STOP_WORDS.includes(clean) // Rule: Cannot be a stop word.
+      );
 
-    const answer = eligibleWords[Math.floor(Math.random() * eligibleWords.length)];
-    const answerIndex = verseText.indexOf(answer);
+    // If heuristics filter out everything, revert to a simpler logic (any word > 2 chars).
+    if (eligibleWords.length === 0) {
+        eligibleWords = originalWords
+            .map(word => ({ original: word, clean: word.replace(/[.,;?!:'"()]/g, '') }))
+            .filter(({ clean }) => clean.length >= 2 && !/^\d+$/.test(clean));
+        
+        // If still no words, skip this line.
+        if (eligibleWords.length === 0) continue;
+    }
+
+    // 3. Sort candidates by length. Longer words are often more significant.
+    eligibleWords.sort((a, b) => b.clean.length - a.clean.length);
+
+    // 4. Pick from the top candidates to add variety, not always picking the longest.
+    const selectionPool = eligibleWords.slice(0, 3); // Top 3 candidates
+    const chosenWord = selectionPool[Math.floor(Math.random() * selectionPool.length)];
+
+    const answerWord = chosenWord.original;
+    const answerIndex = verseText.indexOf(answerWord);
+
+    // This can fail if the same word appears multiple times and indexOf finds the wrong one,
+    // but for a fallback, it's an acceptable trade-off.
     if (answerIndex === -1) continue;
 
     const part1 = verseText.substring(0, answerIndex);
-    const part2 = verseText.substring(answerIndex + answer.length);
+    const part2 = verseText.substring(answerIndex + answerWord.length);
 
     const question: FillInTheBlankQuestion = {
       type: QuestionType.FILL_IN_THE_BLANK,
       verseReference: `${parsedTopic.book} ${verseRefStr}`,
-      verseTextParts: [part1, '___', part2],
-      answers: [answer],
+      verseTextParts: [part1, '___', part2].filter(p => p !== ''),
+      // The answer should be the clean version without punctuation.
+      answers: [chosenWord.clean],
     };
     questions.push(question);
   }

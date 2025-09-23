@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+// FIX: Imported `React` to resolve the 'Cannot find namespace React' error. The `React.SetStateAction` type requires the `React` namespace, which was not previously in scope.
+import React, { useState, useEffect, useCallback } from 'react';
 import type { AppStatus, Profile } from '../types';
 import { getProfile, createProfile, loginUser, registerUser, deleteUserAccount, logoutUser } from '../services/userDataService';
 import { supabase } from '../services/supabaseClient';

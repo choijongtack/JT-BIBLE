@@ -176,3 +176,31 @@ export const continueLearningConversation = async (currentHistory: ChatMessage[]
         throw new Error(`대화를 이어가지 못했습니다: ${errorMessage}`);
     }
 };
+
+export const generatePrayerForTopic = async (topic: string, mode: 'general' | 'advanced'): Promise<string> => {
+    const prompt = `
+당신은 깊은 영성을 지닌 목회자이자 신학자입니다.
+제시된 성경 주제("${topic}")의 핵심 메시지를 깊이 묵상하여, 사용자가 하나님께 감사하고 자신의 삶을 다짐하며 나아갈 수 있는 3~4 문장의 짧고 진실된 기도문을 작성해주세요.
+학습 모드가 '${mode === 'advanced' ? '심화 학습' : '일반 학습'}'이었음을 고려하여 기도문의 톤을 조절해주세요:
+- 심화 학습: 본문의 논리적 구조와 신학적 원리가 드러나는 지적인 성찰이 담긴 기도문.
+- 일반 학습: 본문의 교훈을 실제 삶에 적용하고 감사하는 내용의 따뜻하고 실천적인 기도문.
+다른 어떤 설명이나 인사말 없이, 오직 기도문 텍스트만을 반환해야 합니다.
+`.trim();
+    
+    try {
+        const data = await callChatGptCompletion({
+            model: GPT_MODEL,
+            messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
+        });
+        const prayer = data.choices[0].message.content.trim();
+        if (!prayer) {
+            throw new Error('AI가 유효한 기도문을 반환하지 않았습니다.');
+        }
+        return prayer;
+
+    } catch (error) {
+        console.error(`Error generating prayer for ${topic} from ChatGPT:`, error);
+        const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
+        throw new Error(`기도문을 생성하지 못했습니다: ${errorMessage}`);
+    }
+};

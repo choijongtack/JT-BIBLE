@@ -168,37 +168,38 @@ export const saveActiveSession = async (sessionState: LearningSessionState | nul
   }
 };
 
-//export const testUpdateProgress = async () => {
-//    console.log("--- Running Progress Update Test ---");
-//    const testBook = `Test Book ${new Date().toLocaleTimeString()}`;
-//    const testSession: LearningSessionState = {
-//        topic: `${testBook} 1:1-5`,
-//        currentStep: LearningStep.TEST,
-//        messages: [{ role: 'user', content: 'test message' }, { role: 'model', content: 'test response' }],
-//        aiModel: 'gemini',
-//        bibleVerse: 'This is the test bible verse text.',
-//        score: 10,
-//        quizData: { topic: "Test Quiz", questions: [] },
-//        currentQuestionIndex: 0,
-//        isComplete: true,
-//    };
+export const testUpdateProgress = async () => {
+    console.log("--- Running Progress Update Test ---");
+    const testBook = `Test Book ${new Date().toLocaleTimeString()}`;
+    const testSession: LearningSessionState = {
+        topic: `${testBook} 1:1-5`,
+        currentStep: LearningStep.TEST,
+        messages: [{ role: 'user', content: 'test message' }, { role: 'model', content: 'test response' }],
+        aiModel: 'gemini',
+        bibleVerse: 'This is the test bible verse text.',
+        score: 10,
+        quizData: { topic: "Test Quiz", questions: [] },
+        currentQuestionIndex: 0,
+        isComplete: true,
+        mode: 'general',
+    };
     
-//    const testBookProgress: BookProgress = {
-//      lastSession: testSession,
-//      completedTopics: [`${testBook} 1:1-5`]
-//    };
+    const testBookProgress: BookProgress = {
+      lastSession: testSession,
+      completedTopics: [`${testBook} 1:1-5`]
+    };
 
-//    alert("Sending test update. Check your browser's developer console (F12) for detailed debug info.");
+    alert("Sending test update. Check your browser's developer console (F12) for detailed debug info.");
     
-//    const result = await updateUserProgress(testBook, testBookProgress);
+    const result = await updateUserProgress(testBook, testBookProgress);
     
-//    console.log("--- Progress Update Test Result ---", result);
+    console.log("--- Progress Update Test Result ---", result);
 
-//    if (result.error) {
-//        console.error("Test Update Failed:", result.error);
-//        alert(`Test update failed: ${result.error}\n\nCheck the console for details.`);
-//    } else {
-//        console.log("Test Update Successful. 'After' state:", result.after);
-//        alert("Test update appears to have succeeded. Check the console to verify the 'before' and 'after' states.");
-//    }
-//};
+    if (result.error) {
+        console.error("Test Update Failed:", result.error);
+        alert(`Test update failed: ${result.error}\n\nCheck the console for details.`);
+    } else {
+        console.log("Test Update Successful. 'After' state:", result.after);
+        alert("Test update appears to have succeeded. Check the console to verify the 'before' and 'after' states.");
+    }
+};

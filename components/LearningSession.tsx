@@ -3,8 +3,6 @@ import type { Quiz, ChatMessage, LearningSessionState } from '../types';
 import { LearningStep, IconX } from '../constants';
 import { QuestionType } from '../types';
 import QuizCard from './QuizCard';
-import { decrypt } from '../services/encryptionService';
-import { supabase } from '../services/supabaseClient';
 import { isAnswerCorrect } from '../services/learningSessionUtils';
 import { useBibleVerse } from '../hooks/useBibleVerse';
 import { useAIConversation, ProcessedResponse } from '../hooks/useAIConversation';
@@ -32,12 +30,11 @@ const AI_MODEL_DISPLAY_NAMES: Record<LearningSessionState['aiModel'], string> = 
 };
 
 const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip, onSystemBack }) => {
-  const { topic, aiModel, mode, apiKey: encryptedApiKey } = savedSession;
+  const { topic, aiModel, mode } = savedSession;
   
   // State Management
   const [currentStep, setCurrentStep] = useState<LearningStep>(savedSession.currentStep);
   const [userInput, setUserInput] = useState('');
-  const [decryptedApiKey, setDecryptedApiKey] = useState<string | undefined>(undefined);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
 
   const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
@@ -60,7 +57,6 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     mode,
     aiModel,
     bibleVerse,
-    decryptedApiKey,
   });
 
   // Effect to handle side-effects from AI responses
@@ -81,23 +77,6 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       }
     }
   }, [processedResponse, setBibleVerse, setBibleVerseSource]);
-  
-  // Effect for setting up the session (decrypting key)
-  useEffect(() => {
-    const setup = async () => {
-      if (encryptedApiKey && aiModel === 'perplexity') {
-        try {
-          const session = await supabase.auth.getSession();
-          if (!session.data.session?.access_token) throw new Error("API 키를 복호화하기 위한 인증 토큰을 찾을 수 없습니다.");
-          const plainApiKey = await decrypt(encryptedApiKey, session.data.session.access_token);
-          setDecryptedApiKey(plainApiKey);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'API 키 복호화 실패');
-        }
-      }
-    };
-    setup();
-  }, [encryptedApiKey, aiModel, setError]);
   
   // Effect for starting conversation
   useEffect(() => {
@@ -132,12 +111,12 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   useEffect(() => {
     if (!isInitialized.current && chatHistory.length === 0) return;
     const newState: LearningSessionState = {
-      topic, aiModel, mode, apiKey: encryptedApiKey,
+      topic, aiModel, mode,
       messages: chatHistory, currentStep, bibleVerse,
       quizData, currentQuestionIndex, score, isComplete: isCompleted,
     };
     onStateChange(newState);
-  }, [chatHistory, currentStep, bibleVerse, quizData, currentQuestionIndex, score, isCompleted, onStateChange, topic, aiModel, mode, encryptedApiKey]);
+  }, [chatHistory, currentStep, bibleVerse, quizData, currentQuestionIndex, score, isCompleted, onStateChange, topic, aiModel, mode]);
 
   // Other Effects (scrolling, back button, etc.)
   useEffect(() => {

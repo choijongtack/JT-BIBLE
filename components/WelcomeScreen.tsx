@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { AiModel, Profile } from '../types';
 import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX } from '../constants';
-import { testPerplexityApiKey } from '../services/perplexityService';
+import { savePerplexityApiKey } from '../services/perplexityService';
 import { saveChatGptApiKey } from '../services/chatgptService';
 import { calculateVerseProgressForList } from '../services/bibleData';
 
-type KeyStatus = 'untested' | 'testing' | 'valid' | 'invalid';
-type GptKeyStatus = 'unsaved' | 'saving' | 'saved' | 'error' | 'editing';
+type ApiKeyStatus = 'unsaved' | 'saving' | 'saved' | 'error' | 'editing';
 
 interface WelcomeScreenProps {
-    onStart: (book: string, aiModel: AiModel, apiKey?: string, mode?: 'general' | 'advanced') => void;
+    onStart: (book: string, aiModel: AiModel, mode?: 'general' | 'advanced') => void;
     profile: Profile | null;
     onLogout: () => void;
     onDelete: () => void;
     onGptKeySaved: () => void;
+    onPerplexityKeySaved: () => void;
 }
 
 const IconQuestionMark: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -50,18 +50,18 @@ const StatProgressBar: React.FC<{
     );
 };
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogout, onDelete, onGptKeySaved }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved }) => {
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
     
     // Perplexity state
     const [perplexityApiKey, setPerplexityApiKey] = useState('');
-    const [perplexityKeyStatus, setPerplexityKeyStatus] = useState<KeyStatus>('untested');
+    const [perplexityKeyStatus, setPerplexityKeyStatus] = useState<ApiKeyStatus>('unsaved');
     const [perplexityKeyError, setPerplexityKeyError] = useState<string | null>(null);
 
     // ChatGPT state
     const [chatGptApiKey, setChatGptApiKey] = useState('');
-    const [chatGptKeyStatus, setChatGptKeyStatus] = useState<GptKeyStatus>('unsaved');
+    const [chatGptKeyStatus, setChatGptKeyStatus] = useState<ApiKeyStatus>('unsaved');
     const [chatGptKeyError, setChatGptKeyError] = useState<string | null>(null);
 
     // State for info tooltips
@@ -76,6 +76,12 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
         } else {
             setChatGptKeyStatus('unsaved');
             setChatGptApiKey('');
+        }
+        if (profile?.perplexity_api_key) {
+            setPerplexityKeyStatus('saved');
+        } else {
+            setPerplexityKeyStatus('unsaved');
+            setPerplexityApiKey('');
         }
     }, [profile]);
     
@@ -94,14 +100,17 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
         };
     }, []);
 
-
-    const handleTestPerplexityKey = async () => {
-        setPerplexityKeyStatus('testing');
+    const handleSavePerplexityKey = async () => {
+        setPerplexityKeyStatus('saving');
         setPerplexityKeyError(null);
-        const { isValid, error } = await testPerplexityApiKey(perplexityApiKey);
-        setPerplexityKeyStatus(isValid ? 'valid' : 'invalid');
-        if (!isValid) {
-            setPerplexityKeyError(error || '알 수 없는 오류가 발생했습니다.');
+        try {
+            await savePerplexityApiKey(perplexityApiKey.trim());
+            setPerplexityKeyStatus('saved');
+            onPerplexityKeySaved();
+        } catch (e) {
+            const errorMessage = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
+            setPerplexityKeyStatus('error');
+            setPerplexityKeyError(errorMessage);
         }
     };
     
@@ -127,98 +136,37 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
         const lastSession = profile?.progress?.[selectedBook]?.lastSession;
         const isInProgress = lastSession && lastSession.isComplete !== true;
 
-        // 1. Determine the mode to actually use. If a session is in progress,
-        // its mode always takes precedence. Otherwise, use the user's clicked mode.
         const finalModeToUse = isInProgress ? (lastSession.mode || 'general') : mode;
 
-        // ✅ 디버깅 로그
-        console.log("=== [DEBUG handleStart] ===");
-        console.log("선택한 책:", selectedBook);
-        console.log("사용자가 선택한 모드:", mode);
-        console.log("lastSession:", lastSession);
-        console.log("lastSession?.mode:", lastSession?.mode);
-        console.log("lastSession?.isComplete:", lastSession?.isComplete);
-        console.log("isInProgress:", isInProgress);
-        console.log("최종 적용될 모드(finalModeToUse):", finalModeToUse);
-
-        // 2. If the determined mode is different from what the user just clicked,
-        // it means we overrode their choice. Alert them about it.
         if (isInProgress && mode !== finalModeToUse) {
-            console.log("⚠️ 모드 충돌 → 경고창 표시 (강제 모드:", finalModeToUse, ")");
             setWarningMessage("학습이 완료될 때까지는 기존 선택한 모드로 진행됩니다.\n👉 기존 학습 모드를 선택하세요.");
-            //alert("학습이 완료될 때까지는 기존 선택한 모드로 진행됩니다.");
-            return;  // 🚫 onStart 실행 막기
+            return;
         }
 
-        setWarningMessage(null); // ✅ 정상 실행 시 메시지 제거
-        
-        // 3. Proceed with the determined final mode.
-        if (selectedAI === 'perplexity') {
-            if (perplexityKeyStatus === 'valid') {
-                onStart(selectedBook, selectedAI, perplexityApiKey, finalModeToUse);
-            }
-        } else if (selectedAI === 'chatgpt') {
-            if (chatGptKeyStatus === 'saved') {
-                onStart(selectedBook, selectedAI, undefined, finalModeToUse);
-            }
-        } else {
-            onStart(selectedBook, selectedAI, undefined, finalModeToUse);
-        }
+        setWarningMessage(null);
+        onStart(selectedBook, selectedAI, finalModeToUse);
     };
     
     const isStartDisabled = !selectedBook || 
-        (selectedAI === 'perplexity' && perplexityKeyStatus !== 'valid') ||
+        (selectedAI === 'perplexity' && perplexityKeyStatus !== 'saved') ||
         (selectedAI === 'chatgpt' && chatGptKeyStatus !== 'saved');
 
-    const getPerplexityErrorMessage = (error: string | null, onSwitchToGemini: () => void) => {
+    const getApiErrorMessage = (error: string | null, onSwitchToGemini: () => void, modelName: string) => {
         if (!error) return null;
 
         let specificHelp = '';
         const lowerError = error.toLowerCase();
 
-        if (lowerError.includes('invalid api key') || lowerError.includes('invalid token')) {
-            specificHelp = 'API 키가 잘못되었습니다. Perplexity AI 대시보드에서 키를 다시 복사하여 붙여넣어 보세요. 키에 공백이 포함되지 않았는지 확인해주세요.';
-        } else if (lowerError.includes('not found')) {
-            specificHelp = 'API 요청에 문제가 발생했습니다. 모델 이름이 올바른지 확인해주세요.';
-        } else if (lowerError.includes('rate limit')) {
-            specificHelp = '요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.';
-        }
-
-        return (
-            <div className="text-red-400 text-xs mt-2 space-y-2">
-                <p>API 키 테스트에 실패했습니다.</p>
-                <p className="font-mono bg-red-900/50 p-2 rounded text-red-300">상세 오류: {error}</p>
-                {specificHelp && (
-                    <div className="p-3 bg-slate-700/50 rounded text-slate-300">
-                        <p className="font-bold mb-1">💡 해결 방법</p>
-                        <p>{specificHelp}</p>
-                    </div>
-                )}
-                <div className="p-3 bg-blue-900/50 rounded text-slate-300 border border-blue-700">
-                    <p className="font-bold mb-1">💡 다른 방법</p>
-                    <p>문제가 해결되지 않으면 Gemini 모델로 전환하세요.</p>
-                    <button
-                        type="button"
-                        onClick={onSwitchToGemini}
-                        className="w-full text-center mt-2 px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-500"
-                    >
-                        Gemini 모델로 전환
-                    </button>
-                </div>
-            </div>
-        );
-    };
-    
-    const getGptErrorMessage = (error: string | null, onSwitchToGemini: () => void) => {
-        if (!error) return null;
-
-        let specificHelp = '';
-        const lowerError = error.toLowerCase();
-
-        if (lowerError.includes('quota')) {
-            specificHelp = 'OpenAI 계정의 무료 크레딧을 모두 소진했거나 사용량 한도에 도달했습니다.';
-        } else if (lowerError.includes('incorrect api key') || lowerError.includes('invalid authentication')) {
-            specificHelp = 'API 키가 잘못되었습니다. 다시 확인해주세요.';
+        if (modelName === 'Perplexity') {
+            if (lowerError.includes('invalid') || lowerError.includes('token')) {
+                specificHelp = 'API 키가 잘못되었습니다. Perplexity AI 대시보드에서 키를 다시 복사하여 붙여넣어 보세요.';
+            }
+        } else if (modelName === 'ChatGPT') {
+            if (lowerError.includes('quota')) {
+                specificHelp = 'OpenAI 계정의 무료 크레딧을 모두 소진했거나 사용량 한도에 도달했습니다.';
+            } else if (lowerError.includes('incorrect api key') || lowerError.includes('invalid authentication')) {
+                specificHelp = 'API 키가 잘못되었습니다. 다시 확인해주세요.';
+            }
         }
 
         return (
@@ -381,34 +329,45 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
                     <div className="mt-2 w-full max-w-lg mx-auto">
                         {selectedAI === 'perplexity' && (
                             <div className="p-4 bg-slate-900/50 rounded-lg border border-purple-800/50 animate-fade-in">
-                                <h5 className="text-md font-semibold text-purple-300 mb-3 text-center">Perplexity API 키 입력</h5>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="password"
-                                        value={perplexityApiKey}
-                                        onChange={(e) => {
-                                            setPerplexityApiKey(e.target.value);
-                                            setPerplexityKeyStatus('untested');
-                                            setPerplexityKeyError(null);
-                                        }}
-                                        placeholder="pplx-..."
-                                        className="flex-1 w-full px-3 py-2 bg-slate-700 border border-slate-500 rounded-md text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-purple-500 focus:outline-none transition"
-                                    />
-                                    <button
-                                        onClick={handleTestPerplexityKey}
-                                        disabled={!perplexityApiKey || perplexityKeyStatus === 'testing'}
-                                        className="px-4 py-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
-                                    >
-                                        {perplexityKeyStatus === 'testing' ? '테스트 중...' : '키 테스트'}
-                                    </button>
-                                </div>
-                                {perplexityKeyStatus === 'valid' && (
-                                    <div className="mt-2 flex items-center gap-2 text-green-400 text-sm">
-                                        <IconCheck className="w-5 h-5" />
-                                        <span>API 키가 유효합니다.</span>
+                                <h5 className="text-md font-semibold text-purple-300 mb-3 text-center">Perplexity API 키 관리</h5>
+                                {perplexityKeyStatus === 'saved' ? (
+                                    <div className="flex items-center justify-between p-3 bg-slate-800 rounded-lg">
+                                        <div className="flex items-center gap-2 text-green-400">
+                                            <IconCheck className="w-5 h-5" />
+                                            <span>API 키가 안전하게 저장되었습니다.</span>
+                                        </div>
+                                        <button 
+                                            onClick={() => {
+                                                setPerplexityKeyStatus('editing');
+                                                setPerplexityApiKey('');
+                                                setPerplexityKeyError(null);
+                                            }}
+                                            className="px-4 py-1 text-sm text-slate-300 bg-slate-600 rounded-md hover:bg-slate-500"
+                                        >
+                                            수정
+                                        </button>
                                     </div>
+                                ) : (
+                                    <>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="password"
+                                                value={perplexityApiKey}
+                                                onChange={(e) => setPerplexityApiKey(e.target.value)}
+                                                placeholder="pplx-..."
+                                                className="flex-1 w-full px-3 py-2 bg-slate-700 border border-slate-500 rounded-md text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-purple-500 focus:outline-none transition"
+                                            />
+                                            <button
+                                                onClick={handleSavePerplexityKey}
+                                                disabled={!perplexityApiKey || perplexityKeyStatus === 'saving'}
+                                                className="px-4 py-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
+                                            >
+                                                {perplexityKeyStatus === 'saving' ? '저장 중...' : '키 저장'}
+                                            </button>
+                                        </div>
+                                        {perplexityKeyError && getApiErrorMessage(perplexityKeyError, () => setSelectedAI('gemini'), 'Perplexity')}
+                                    </>
                                 )}
-                                {perplexityKeyError && getPerplexityErrorMessage(perplexityKeyError, () => setSelectedAI('gemini'))}
                             </div>
                         )}
                         {selectedAI === 'chatgpt' && (
@@ -449,7 +408,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
                                                 {chatGptKeyStatus === 'saving' ? '저장 중...' : '키 저장'}
                                             </button>
                                         </div>
-                                        {chatGptKeyError && getGptErrorMessage(chatGptKeyError, () => setSelectedAI('gemini'))}
+                                        {chatGptKeyError && getApiErrorMessage(chatGptKeyError, () => setSelectedAI('gemini'), 'ChatGPT')}
                                     </>
                                 )}
                             </div>

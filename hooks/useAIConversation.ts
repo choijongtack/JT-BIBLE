@@ -25,10 +25,9 @@ interface UseAIConversationProps {
   mode: 'general' | 'advanced';
   aiModel: LearningSessionState['aiModel'];
   bibleVerse: string | null;
-  decryptedApiKey?: string;
 }
 
-export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bibleVerse, decryptedApiKey }: UseAIConversationProps) => {
+export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bibleVerse }: UseAIConversationProps) => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialChatHistory);
     const [isLoading, setIsLoading] = useState(false);
@@ -162,8 +161,8 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
             const finalApiMessage = constructEnforcedPrompt(messageContent, topic, bibleVerse, options);
             let responseText: string;
             
-            if (aiModel === 'perplexity' && decryptedApiKey) {
-                responseText = await continuePerplexityConversation(chatHistory, finalApiMessage, topic, mode, decryptedApiKey);
+            if (aiModel === 'perplexity') {
+                responseText = await continuePerplexityConversation(chatHistory, finalApiMessage, topic, mode);
             } else if (aiModel === 'chatgpt') {
                 responseText = await continueChatGptConversation(chatHistory, finalApiMessage, topic, mode);
             } else {
@@ -183,7 +182,7 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
         } finally {
             setIsLoading(false);
         }
-    }, [isLoading, chatHistory, aiModel, decryptedApiKey, processAIResponse, topic, bibleVerse, mode]);
+    }, [isLoading, chatHistory, aiModel, processAIResponse, topic, bibleVerse, mode]);
     
 
     return { messages, setMessages, chatHistory, setChatHistory, isLoading, error, setError, sendMessage, processedResponse };

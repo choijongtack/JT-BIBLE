@@ -41,7 +41,6 @@ export interface LearningSessionState {
   messages: ChatMessage[];
   aiModel: AiModel;
   mode: 'general' | 'advanced';
-  apiKey?: string; // Only used for Perplexity model now
   bibleVerse: string | null;
   score: number;
   quizData: Quiz | null;
@@ -65,4 +64,5 @@ export interface Profile {
     progress: UserProgress;
     active_learning_session: LearningSessionState | null;
     chatgpt_api_key?: string;
+    perplexity_api_key?: string;
 }

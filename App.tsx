@@ -12,14 +12,14 @@ import AwaitingConfirmationScreen from './components/AwaitingConfirmationScreen'
 import ProfileErrorScreen from './components/ProfileErrorScreen';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ProgressDebugPanel from './components/ProgressDebugPanel';
-import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
-import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic } from './services/perplexityService';
-import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic } from './services/chatgptService';
+import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic, generatePrayerForTopic as generateGeminiPrayer } from './services/geminiService';
+import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic, generatePrayerForTopic as generatePerplexityPrayer } from './services/perplexityService';
+import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic, generatePrayerForTopic as generateChatGptPrayer } from './services/chatgptService';
 import { updateUserProgress, saveActiveSession } from './services/userDataService';
-import { encrypt } from './services/encryptionService';
 import type { BookProgress, AiModel } from './types';
 import { getBibleVerse, getLastVerseInChapter } from './services/bibleService';
 import { useProfileSession } from './hooks/useProfileSession';
+
 
 // A robust function to extract the correct Bible book name from a topic string.
 const ALL_BOOKS = [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS].sort((a, b) => b.length - a.length);
@@ -29,6 +29,49 @@ const getBookFromTopic = (topic: string): string => {
     const foundBook = ALL_BOOKS.find(bookName => topic.trim().startsWith(bookName));
     return foundBook || topic.split(' ')[0];
 };
+
+// --- 학습 완료 안내 모달 ---
+interface BookCompletedModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    bookName: string | null;
+}
+
+const BookCompletedModal: React.FC<BookCompletedModalProps> = ({ isOpen, onClose, bookName }) => {
+    if (!isOpen || !bookName) return null;
+
+    return (
+        <div
+            className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+            onClick={onClose}
+            aria-modal="true"
+            role="dialog"
+        >
+            <div
+                className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md flex flex-col border border-slate-700"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="p-6 sm:p-8 text-center">
+                    <h2 className="text-2xl font-bold text-slate-100 mb-4">학습 완료</h2>
+                    <p className="text-slate-300">
+                        '{bookName}'의 학습을 모두 완료하셨습니다.
+                        <br />
+                        다른 책을 선택하여 학습을 계속해주세요.
+                    </p>
+                </div>
+                <div className="flex p-4 bg-slate-900/50 rounded-b-2xl">
+                     <button
+                        onClick={onClose}
+                        className="w-full px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 transition-colors"
+                     >
+                        확인
+                     </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 // --- State Management with useReducer ---
 
@@ -40,10 +83,15 @@ interface AppState {
         total: number;
         topic: string;
         exitType: 'quiz' | 'save';
+        prayerText: string | null;
     };
     error: string | null;
     loadingMessage: string;
     isDeleteConfirmOpen: boolean;
+    completedBookModal: {
+        isOpen: boolean;
+        bookName: string | null;
+    };
     progressDebugInfo: {
         before: Profile['progress'] | null;
         request: Profile['progress'] | null;
@@ -60,21 +108,24 @@ type AppAction =
     | { type: 'SET_ERROR'; payload: string | null }
     | { type: 'START_LEARNING'; payload: LearningSessionState }
     | { type: 'UPDATE_LEARNING_STATE'; payload: LearningSessionState }
-    | { type: 'FINISH_LEARNING'; payload: { score: number; total: number; topic: string; debugInfo: any } }
+    | { type: 'FINISH_LEARNING'; payload: { score: number; total: number; topic: string; prayerText: string | null; debugInfo: any } }
     | { type: 'SAVE_AND_EXIT'; payload: { topic: string; debugInfo: any } }
     | { type: 'GO_TO_IDLE' }
     | { type: 'RESUME_SESSION' }
     | { type: 'DISCARD_SESSION' }
     | { type: 'OPEN_DELETE_MODAL' }
-    | { type: 'CLOSE_DELETE_MODAL' };
+    | { type: 'CLOSE_DELETE_MODAL' }
+    | { type: 'OPEN_COMPLETED_MODAL'; payload: string }
+    | { type: 'CLOSE_COMPLETED_MODAL' };
 
 const initialState: AppState = {
     status: 'loading',
     activeSession: null,
-    lastSessionResult: { score: 0, total: 0, topic: '', exitType: 'quiz' },
+    lastSessionResult: { score: 0, total: 0, topic: '', exitType: 'quiz', prayerText: null },
     error: null,
     loadingMessage: '앱을 초기화하고 Supabase에 연결하는 중...',
     isDeleteConfirmOpen: false,
+    completedBookModal: { isOpen: false, bookName: null },
     progressDebugInfo: null,
 };
 
@@ -111,7 +162,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
                 ...state,
                 status: 'finished',
                 activeSession: null,
-                lastSessionResult: { score: -1, total: 0, topic: action.payload.topic, exitType: 'save' },
+                lastSessionResult: { score: -1, total: 0, topic: action.payload.topic, exitType: 'save', prayerText: null },
                 progressDebugInfo: action.payload.debugInfo,
             };
         case 'GO_TO_IDLE':
@@ -124,6 +175,10 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
             return { ...state, isDeleteConfirmOpen: true };
         case 'CLOSE_DELETE_MODAL':
             return { ...state, isDeleteConfirmOpen: false };
+        case 'OPEN_COMPLETED_MODAL':
+            return { ...state, status: 'idle', completedBookModal: { isOpen: true, bookName: action.payload } };
+        case 'CLOSE_COMPLETED_MODAL':
+            return { ...state, completedBookModal: { isOpen: false, bookName: null } };
         default:
             return state;
     }
@@ -131,7 +186,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
 
 const App: React.FC = () => {
     const [state, dispatch] = useReducer(appReducer, initialState);
-    const { status, activeSession, lastSessionResult, error, loadingMessage, isDeleteConfirmOpen, progressDebugInfo } = state;
+    const { status, activeSession, lastSessionResult, error, loadingMessage, isDeleteConfirmOpen, completedBookModal, progressDebugInfo } = state;
 
     const {
         authStatus,
@@ -165,7 +220,7 @@ const App: React.FC = () => {
     }, [authStatus, profile]);
 
 
-    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, apiKey?: string, mode?: 'general' | 'advanced') => {
+    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, mode?: 'general' | 'advanced') => {
         dispatch({ type: 'START_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
 
         try {
@@ -196,8 +251,7 @@ const App: React.FC = () => {
                     if (lastTopicRef && bookMeta) {
                         const lastVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
                         if (lastTopicRef.chapter === bookMeta.chapters && lastVerse >= bookMeta.versesInLastChapter) {
-                            alert(`'${book}'의 학습을 모두 완료하셨습니다.`);
-                            dispatch({ type: 'GO_TO_IDLE' });
+                            dispatch({ type: 'OPEN_COMPLETED_MODAL', payload: book });
                             return;
                         }
                     }
@@ -206,9 +260,10 @@ const App: React.FC = () => {
                 dispatch({ type: 'START_LOADING', payload: `'${topicToGet}'${isNextTopic ? ' 다음' : '의 첫'} 주제를 찾는 중...` });
                 const newSelectedModel = aiModel || 'gemini';
 
-                if (newSelectedModel === 'perplexity' && apiKey) {
-                    nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, apiKey, book) : await getPerplexityStudyTopic(topicToGet, apiKey);
+                if (newSelectedModel === 'perplexity') {
+                    nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, book) : await getPerplexityStudyTopic(topicToGet);
                 } else if (newSelectedModel === 'chatgpt') {
+                    // FIX: Corrected a typo where `getNextChatGptStudyTopic` was called with one argument instead of `getChatGptStudyTopic`.
                     nextTopic = isNextTopic ? await getNextChatGptStudyTopic(topicToGet, book) : await getChatGptStudyTopic(topicToGet);
                 } else {
                     nextTopic = isNextTopic ? await getNextGeminiStudyTopic(topicToGet, book) : await getGeminiStudyTopic(topicToGet);
@@ -248,8 +303,7 @@ const App: React.FC = () => {
                             correctedTopic = `${book} ${nextChapter}:1-${maxStep}`;
                         } else {
                             // This is the last verse of the last chapter. The book is complete.
-                            alert(`'${book}'의 학습을 모두 완료하셨습니다.`);
-                            dispatch({ type: 'GO_TO_IDLE' });
+                            dispatch({ type: 'OPEN_COMPLETED_MODAL', payload: book });
                             return; // exit the function
                         }
                     }
@@ -270,19 +324,12 @@ const App: React.FC = () => {
                     bibleVerse = verseResult.text;
                 }
 
-                let encryptedApiKey: string | undefined = apiKey;
-                if (apiKey && aiModel === 'perplexity') {
-                    if (!session?.access_token) throw new Error("API 키를 암호화하기 위한 인증 토큰을 찾을 수 없습니다.");
-                    encryptedApiKey = await encrypt(apiKey, session.access_token);
-                }
-
                 sessionToStart = {
                     topic: nextTopic,
                     currentStep: LearningStep.ANALYSIS,
                     messages: [],
                     aiModel: aiModel || 'gemini',
                     mode: newMode,
-                    apiKey: aiModel === 'perplexity' ? encryptedApiKey : undefined,
                     bibleVerse: bibleVerse,
                     score: 0, quizData: null, currentQuestionIndex: 0
                 };
@@ -292,20 +339,41 @@ const App: React.FC = () => {
             const message = e instanceof Error ? e.message : '학습 세션을 시작하는 데 실패했습니다.';
             dispatch({ type: 'SET_ERROR', payload: message });
         }
-    }, [profile, session]);
+    }, [profile]);
 
     const handleFinishLearning = useCallback(async (score: number, total: number) => {
         if (!activeSession || !profile || !activeSession.topic) {
             dispatch({ type: 'SET_ERROR', payload: "학습 세션을 완료할 수 없습니다: 유효하지 않은 세션 데이터입니다." });
             return;
         }
+    
+        dispatch({ type: 'START_LOADING', payload: `'${activeSession.topic}'에 대한 기도문을 생성 중입니다...` });
+
+        let prayerText: string | null = null;
+        try {
+            switch (activeSession.aiModel) {
+                case 'perplexity':
+                    prayerText = await generatePerplexityPrayer(activeSession.topic, activeSession.mode);
+                    break;
+                case 'chatgpt':
+                    prayerText = await generateChatGptPrayer(activeSession.topic, activeSession.mode);
+                    break;
+                case 'gemini':
+                default:
+                    prayerText = await generateGeminiPrayer(activeSession.topic, activeSession.mode);
+                    break;
+            }
+        } catch (e) {
+            console.warn("기도문 생성에 실패했습니다:", e);
+            // Do not block the user flow if prayer generation fails.
+            prayerText = null; 
+        }
+
+        dispatch({ type: 'START_LOADING', payload: `학습 결과를 저장하는 중...` });
 
         const book = getBookFromTopic(activeSession.topic);
         const currentBookProgress = profile.progress?.[book] || { lastSession: activeSession, completedTopics: [] };
         
-        // FIX: Explicitly typed the Set as Set<string> to resolve a TypeScript inference
-        // error where `Array.from` would otherwise produce `unknown[]` instead of `string[]`.
-        // This ensures type safety when updating the user's progress.
         const completedTopicsSet = new Set<string>(currentBookProgress.completedTopics);
         completedTopicsSet.add(activeSession.topic);
 
@@ -324,7 +392,7 @@ const App: React.FC = () => {
 
         setProfile(prev => prev ? { ...prev, progress: result.after!, active_learning_session: null } : null);
         await saveActiveSession(null);
-        dispatch({ type: 'FINISH_LEARNING', payload: { score, total, topic: activeSession.topic, debugInfo: result } });
+        dispatch({ type: 'FINISH_LEARNING', payload: { score, total, topic: activeSession.topic, prayerText, debugInfo: result } });
 
     }, [activeSession, profile, setProfile]);
 
@@ -373,6 +441,13 @@ const App: React.FC = () => {
             return { ...prev, chatgpt_api_key: 'key_saved_placeholder' };
         });
     }, [setProfile]);
+    
+    const handlePerplexityKeySaved = useCallback(() => {
+        setProfile(prev => {
+            if (!prev) return null;
+            return { ...prev, perplexity_api_key: 'key_saved_placeholder' };
+        });
+    }, [setProfile]);
 
     const handleDiscard = useCallback(() => {
         if(profile?.id) saveActiveSession(null);
@@ -411,7 +486,14 @@ const App: React.FC = () => {
                  return <ProfileErrorScreen error={authError || "알 수 없는 프로필 오류가 발생했습니다."} onLogout={logout} />;
             case 'idle':
                 return (
-                    <WelcomeScreen onStart={handleStartLearning} profile={profile} onLogout={logout} onDelete={() => dispatch({ type: 'OPEN_DELETE_MODAL' })} onGptKeySaved={handleGptKeySaved} />
+                    <WelcomeScreen 
+                        onStart={handleStartLearning} 
+                        profile={profile} 
+                        onLogout={logout} 
+                        onDelete={() => dispatch({ type: 'OPEN_DELETE_MODAL' })} 
+                        onGptKeySaved={handleGptKeySaved}
+                        onPerplexityKeySaved={handlePerplexityKeySaved}
+                    />
                 );
             case 'session-prompt':
                 if (!activeSession) {
@@ -467,6 +549,11 @@ const App: React.FC = () => {
             </main>
 
             <DeleteConfirmationModal isOpen={isDeleteConfirmOpen} onConfirm={executeDelete} onCancel={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })} />
+            <BookCompletedModal
+                isOpen={completedBookModal.isOpen}
+                bookName={completedBookModal.bookName}
+                onClose={() => dispatch({ type: 'CLOSE_COMPLETED_MODAL' })}
+            />
         </div>
     );
 };
