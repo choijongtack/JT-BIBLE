@@ -358,8 +358,7 @@ const App: React.FC = () => {
             }
         } catch (e) {
             console.warn("기도문 생성에 실패했습니다:", e);
-            // Do not block the user flow if prayer generation fails.
-            prayerText = null; 
+            prayerText = "기도문 생성에 실패했습니다. AI의 안전 설정에 의해 차단되었거나 네트워크 문제가 발생했을 수 있습니다. 잠시 후 다시 시도해 주세요.";
         }
 
         dispatch({ type: 'START_LOADING', payload: `학습 결과를 저장하는 중...` });

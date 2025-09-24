@@ -40,12 +40,26 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
   const questions: FillInTheBlankQuestion[] = [];
   const lines = bibleVerse.trim().split('\n');
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const lineMatch = line.match(/^(\d+:\d+)\s(.+)/s);
-    if (!lineMatch) continue;
+    let finalVerseReference: string;
+    let verseText: string;
 
-    const verseRefStr = lineMatch[1];
-    const verseText = lineMatch[2].trim();
+    if (lineMatch) {
+        // Case 1: 절 번호가 있는 경우
+        const verseRefPart = lineMatch[1]; // "1:1"
+        verseText = lineMatch[2].trim();
+        finalVerseReference = `${parsedTopic.book} ${verseRefPart}`;
+    } else if (line.trim()) {
+        // Case 2: 절 번호가 없는 경우 (새로운 로직)
+        verseText = line.trim();
+        // topic에서 파싱한 정보와 현재 줄의 순서(index)를 이용해 참조를 만듭니다.
+        const verseNum = parsedTopic.verses[index] || (index + 1);
+        finalVerseReference = `${parsedTopic.book} ${parsedTopic.chapter}:${verseNum}`;
+    } else {
+        continue; // 빈 줄은 건너뜁니다.
+    }
+
     const originalWords = verseText.split(/\s+/);
 
     // 2. Filter for eligible words based on heuristics.
@@ -90,7 +104,7 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
 
     const question: FillInTheBlankQuestion = {
       type: QuestionType.FILL_IN_THE_BLANK,
-      verseReference: `${parsedTopic.book} ${verseRefStr}`,
+      verseReference: finalVerseReference,
       verseTextParts: [part1, '___', part2].filter(p => p !== ''),
       // The answer should be the clean version without punctuation.
       answers: [chosenWord.clean],

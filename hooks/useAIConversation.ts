@@ -158,7 +158,24 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
         setProcessedResponse(null);
     
         try {
-            const finalApiMessage = constructEnforcedPrompt(messageContent, topic, bibleVerse, options);
+            let finalApiMessage: string;
+            const isFirstMessage = chatHistory.length === 0;
+
+            if (isFirstMessage && !bibleVerse) {
+                // DB에서 본문을 가져오지 못했고, AI와의 첫 대화일 경우,
+                // AI에게 본문을 요청하는 지침을 동적으로 생성합니다.
+                const firstMissionInstruction = `
+[시스템 지시] 당신의 첫 번째 임무는 '${topic}'에 해당하는 전체 성경 본문을 '개역개정판'으로 제공하는 것입니다.
+**매우 중요:** 각 절은 반드시 '장:절' 형식의 번호로 시작해야 합니다 (예: '1:1 태초에...'). 이 형식을 지키지 않으면 시스템 오류가 발생하므로 반드시 준수해야 합니다.
+본문 전체는 반드시 [BIBLE_VERSE]와 [/BIBLE_VERSE] 태그로 감싸야 합니다.
+이 임무를 완수한 후, 사용자의 원래 요청에 응답하여 대화를 시작하세요: "${messageContent}"
+                `.trim();
+                finalApiMessage = firstMissionInstruction;
+            } else {
+                // 그 외 모든 경우에는 기존의 컨텍스트 강화 로직을 사용합니다.
+                finalApiMessage = constructEnforcedPrompt(messageContent, topic, bibleVerse, options);
+            }
+            
             let responseText: string;
             
             if (aiModel === 'perplexity') {
