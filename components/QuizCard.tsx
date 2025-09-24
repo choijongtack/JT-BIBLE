@@ -203,7 +203,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
                 onClick={onNext}
                 className="px-6 py-2 bg-slate-600 text-white font-semibold rounded-lg shadow-md hover:bg-slate-500 transition-colors"
               >
-                {questionNumber === totalQuestions ? '결과 보기' : '다음 문제'}
+                {questionNumber === totalQuestions ? '시험 완료' : '다음 문제'}
               </button>
             )
           )}

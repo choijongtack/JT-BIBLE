@@ -1,4 +1,4 @@
-// FIX: Added Deno type declaration to resolve "Cannot find name 'Deno'" error.
+// FIX: Added Deno type declaration to resolve "Cannot find name 'Deno'".
 declare var Deno: {
   env: {
     get(key: string): string | undefined;
@@ -13,7 +13,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// FIX: Updated model from deprecated gemini-1.5-flash to gemini-2.5-flash.
+// FIX: Updated model from deprecated gemini-1.5-flash to the current gemini-2.5-flash model.
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 serve(async (req) => {

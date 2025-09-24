@@ -5,9 +5,11 @@ interface PrayerModalProps {
     onClose: () => void;
     prayerText: string;
     topic: string;
+    onConfirm?: () => void;
+    confirmButtonText?: string;
 }
 
-const PrayerModal: React.FC<PrayerModalProps> = ({ isOpen, onClose, prayerText, topic }) => {
+const PrayerModal: React.FC<PrayerModalProps> = ({ isOpen, onClose, prayerText, topic, onConfirm, confirmButtonText }) => {
     if (!isOpen) return null;
 
     const isError = prayerText.includes("실패했습니다");
@@ -49,10 +51,10 @@ const PrayerModal: React.FC<PrayerModalProps> = ({ isOpen, onClose, prayerText, 
                 </div>
                 <div className="flex p-4 bg-slate-900/50 rounded-b-2xl">
                      <button
-                        onClick={onClose}
+                        onClick={onConfirm || onClose}
                         className="w-full px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 transition-colors"
                      >
-                        확인
+                        {confirmButtonText || '확인'}
                      </button>
                 </div>
             </div>

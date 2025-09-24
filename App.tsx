@@ -11,9 +11,9 @@ import AwaitingConfirmationScreen from './components/AwaitingConfirmationScreen'
 import ProfileErrorScreen from './components/ProfileErrorScreen';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ProgressDebugPanel from './components/ProgressDebugPanel';
-import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic, generatePrayerForTopic as generateGeminiPrayer } from './services/geminiService';
-import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic, generatePrayerForTopic as generatePerplexityPrayer } from './services/perplexityService';
-import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic, generatePrayerForTopic as generateChatGptPrayer } from './services/chatgptService';
+import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
+import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic } from './services/perplexityService';
+import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic } from './services/chatgptService';
 import { updateUserProgress } from './services/userDataService';
 import type { BookProgress, AiModel } from './types';
 import { getBibleVerse, getLastVerseInChapter } from './services/bibleService';
@@ -78,12 +78,9 @@ interface AppState {
     status: AppStatus;
     activeSession: LearningSessionState | null;
     lastSessionResult: {
-        score: number;
-        total: number;
         topic: string;
-        exitType: 'quiz' | 'save';
-        prayerText: string | null;
-    };
+        exitType: 'save';
+    } | null;
     error: string | null;
     loadingMessage: string;
     isDeleteConfirmOpen: boolean;
@@ -107,7 +104,7 @@ type AppAction =
     | { type: 'SET_ERROR'; payload: string | null }
     | { type: 'START_LEARNING'; payload: LearningSessionState }
     | { type: 'UPDATE_LEARNING_STATE'; payload: LearningSessionState }
-    | { type: 'FINISH_LEARNING'; payload: { score: number; total: number; topic: string; prayerText: string | null; debugInfo: any } }
+    | { type: 'FINISH_LEARNING'; payload: { debugInfo: any } }
     | { type: 'SAVE_AND_EXIT'; payload: { topic: string; debugInfo: any } }
     | { type: 'GO_TO_IDLE' }
     | { type: 'OPEN_DELETE_MODAL' }
@@ -118,7 +115,7 @@ type AppAction =
 const initialState: AppState = {
     status: 'loading',
     activeSession: null,
-    lastSessionResult: { score: 0, total: 0, topic: '', exitType: 'quiz', prayerText: null },
+    lastSessionResult: null,
     error: null,
     loadingMessage: '앱을 초기화하고 Supabase에 연결하는 중...',
     isDeleteConfirmOpen: false,
@@ -149,9 +146,9 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         case 'FINISH_LEARNING':
             return {
                 ...state,
-                status: 'finished',
+                status: 'idle',
                 activeSession: null,
-                lastSessionResult: { ...action.payload, exitType: 'quiz' },
+                lastSessionResult: null,
                 progressDebugInfo: action.payload.debugInfo,
             };
         case 'SAVE_AND_EXIT':
@@ -159,11 +156,11 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
                 ...state,
                 status: 'finished',
                 activeSession: null,
-                lastSessionResult: { score: -1, total: 0, topic: action.payload.topic, exitType: 'save', prayerText: null },
+                lastSessionResult: { topic: action.payload.topic, exitType: 'save' },
                 progressDebugInfo: action.payload.debugInfo,
             };
         case 'GO_TO_IDLE':
-            return { ...state, status: 'idle', activeSession: null, error: null, progressDebugInfo: null };
+            return { ...state, status: 'idle', activeSession: null, error: null, progressDebugInfo: null, lastSessionResult: null };
         case 'OPEN_DELETE_MODAL':
             return { ...state, isDeleteConfirmOpen: true };
         case 'CLOSE_DELETE_MODAL':
@@ -194,23 +191,20 @@ const App: React.FC = () => {
         setAuthError
     } = useProfileSession();
 
-    // FIX: Correctly map `AuthStatus` to the appropriate `AppStatus` or action. The previous implementation caused a type error by dispatching `authStatus` values like 'authenticated' and 'unauthenticated', which are not valid `AppStatus` values. This logic now correctly handles each authentication state.
     useEffect(() => {
         if (authStatus === 'authenticated') {
-            // When authenticated, the LOGIN_SUCCESS action determines the next app state ('idle' or 'session-prompt').
-            // We don't dispatch SET_AUTH_STATUS directly.
-            if (profile) {
+            // This effect transitions the app to the 'idle' state after a successful login and profile load.
+            // It's designed to run only once after authentication, not on every profile update.
+            // By checking the current `status`, we prevent it from resetting the UI during active sessions (like 'learning' or 'finished').
+            if (profile && (status === 'loading' || status === 'login' || status === 'awaiting-confirmation' || status === 'profile_error')) {
                 dispatch({ type: 'LOGIN_SUCCESS' });
             }
         } else if (authStatus === 'unauthenticated') {
-            // Map 'unauthenticated' from the auth hook to the 'login' screen state.
             dispatch({ type: 'SET_AUTH_STATUS', payload: 'login' });
         } else {
-            // Handle statuses that are common between AuthStatus and AppStatus:
-            // 'loading', 'awaiting-confirmation', 'profile_error'
             dispatch({ type: 'SET_AUTH_STATUS', payload: authStatus });
         }
-    }, [authStatus, profile]);
+    }, [authStatus, profile, status]);
 
 
     const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, mode?: 'general' | 'advanced') => {
@@ -332,35 +326,14 @@ const App: React.FC = () => {
             const message = e instanceof Error ? e.message : '학습 세션을 시작하는 데 실패했습니다.';
             dispatch({ type: 'SET_ERROR', payload: message });
         }
-    }, [profile]);
+    }, [profile, status]);
 
-    const handleFinishLearning = useCallback(async (score: number, total: number) => {
+    const handleFinishLearning = useCallback(async () => {
         if (!activeSession || !profile || !activeSession.topic) {
             dispatch({ type: 'SET_ERROR', payload: "학습 세션을 완료할 수 없습니다: 유효하지 않은 세션 데이터입니다." });
             return;
         }
     
-        dispatch({ type: 'START_LOADING', payload: `'${activeSession.topic}'에 대한 기도문을 생성 중입니다...` });
-
-        let prayerText: string | null = null;
-        try {
-            switch (activeSession.aiModel) {
-                case 'perplexity':
-                    prayerText = await generatePerplexityPrayer(activeSession.topic, activeSession.mode);
-                    break;
-                case 'chatgpt':
-                    prayerText = await generateChatGptPrayer(activeSession.topic, activeSession.mode);
-                    break;
-                case 'gemini':
-                default:
-                    prayerText = await generateGeminiPrayer(activeSession.topic, activeSession.mode);
-                    break;
-            }
-        } catch (e) {
-            console.warn("기도문 생성에 실패했습니다:", e);
-            prayerText = "기도문 생성에 실패했습니다. AI의 안전 설정에 의해 차단되었거나 네트워크 문제가 발생했을 수 있습니다. 잠시 후 다시 시도해 주세요.";
-        }
-
         dispatch({ type: 'START_LOADING', payload: `학습 결과를 저장하는 중...` });
 
         const book = getBookFromTopic(activeSession.topic);
@@ -383,7 +356,7 @@ const App: React.FC = () => {
         }
 
         setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
-        dispatch({ type: 'FINISH_LEARNING', payload: { score, total, topic: activeSession.topic, prayerText, debugInfo: result } });
+        dispatch({ type: 'FINISH_LEARNING', payload: { debugInfo: result } });
 
     }, [activeSession, profile, setProfile]);
 
@@ -491,7 +464,11 @@ const App: React.FC = () => {
                     onSystemBack={() => saveCurrentSession(true)}
                 />;
             case 'finished':
-                return <ResultsScreen lastResult={lastSessionResult} onRestart={() => dispatch({ type: 'GO_TO_IDLE' })} onContinue={handleStartLearning} progressDebugInfo={progressDebugInfo} />;
+                if (!lastSessionResult) {
+                     dispatch({ type: 'GO_TO_IDLE' });
+                     return null;
+                }
+                return <ResultsScreen lastResult={lastSessionResult} onRestart={() => dispatch({ type: 'GO_TO_IDLE' })} progressDebugInfo={progressDebugInfo} />;
             case 'error':
                 return (
                     <div className="text-center bg-slate-800/50 p-6 sm:p-10 rounded-2xl shadow-2xl border border-slate-700 max-w-2xl mx-auto">

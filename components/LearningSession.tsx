@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Quiz, ChatMessage, LearningSessionState } from '../types';
-import { LearningStep, IconX } from '../constants';
+import { LearningStep } from '../constants';
 import { QuestionType } from '../types';
 import QuizCard from './QuizCard';
 import { isAnswerCorrect } from '../services/learningSessionUtils';
@@ -12,11 +12,16 @@ import BibleVersePanel from './learning/BibleVersePanel';
 import StepControl from './learning/StepControl';
 import LoadingDots from './learning/LoadingDots';
 import StepSelectionModal from './learning/StepSelectionModal';
+import PrayerModal from './PrayerModal';
+import { generatePrayerForTopic as generateGeminiPrayer } from '../services/geminiService';
+import { generatePrayerForTopic as generatePerplexityPrayer } from '../services/perplexityService';
+import { generatePrayerForTopic as generateChatGptPrayer } from '../services/chatgptService';
+
 
 interface ConversationalLearningProps {
   savedSession: LearningSessionState;
   onStateChange: (newState: LearningSessionState) => void;
-  onFinish: (score: number, total: number) => void;
+  onFinish: () => void;
   onBack: () => void;
   onSaveAndExit: () => void;
   onSkip: () => void;
@@ -48,6 +53,11 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const optionsMenuRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isInitialized = useRef(false);
+
+  // Prayer Flow State
+  const [isGeneratingPrayer, setIsGeneratingPrayer] = useState(false);
+  const [prayerText, setPrayerText] = useState<string | null>(null);
+  const [isPrayerModalOpen, setIsPrayerModalOpen] = useState(false);
 
   // Custom Hooks
   const { bibleVerse, setBibleVerse, bibleVerseSource, setBibleVerseSource, verseFetchError, isFetching: isFetchingVerse } = useBibleVerse(topic, savedSession.bibleVerse);
@@ -202,6 +212,33 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     }
   }, [quizData, currentQuestionIndex]);
 
+  const handleRequestPrayer = useCallback(async () => {
+    setIsGeneratingPrayer(true);
+    let generatedPrayer: string | null = null;
+    try {
+        switch (aiModel) {
+            case 'perplexity':
+                generatedPrayer = await generatePerplexityPrayer(topic, mode);
+                break;
+            case 'chatgpt':
+                generatedPrayer = await generateChatGptPrayer(topic, mode);
+                break;
+            case 'gemini':
+            default:
+                generatedPrayer = await generateGeminiPrayer(topic, mode);
+                break;
+        }
+    } catch (e) {
+        console.warn("기도문 생성에 실패했습니다:", e);
+        generatedPrayer = "기도문 생성에 실패했습니다. AI의 안전 설정에 의해 차단되었거나 네트워크 문제가 발생했을 수 있습니다. 잠시 후 다시 시도해 주세요.";
+    } finally {
+        setPrayerText(generatedPrayer);
+        setIsGeneratingPrayer(false);
+        setIsPrayerModalOpen(true);
+    }
+  }, [aiModel, topic, mode]);
+
+
   // Render Logic
   if (error) {
     return (
@@ -243,6 +280,19 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   return (
     <>
       <StepSelectionModal isOpen={isStepModalOpen} onClose={() => setIsStepModalOpen(false)} onSelect={handleForceStepChange} currentStep={currentStep} mode={mode} />
+      {prayerText && (
+          <PrayerModal
+              isOpen={isPrayerModalOpen}
+              onClose={() => setIsPrayerModalOpen(false)}
+              prayerText={prayerText}
+              topic={topic}
+              onConfirm={() => {
+                  setIsPrayerModalOpen(false);
+                  onFinish();
+              }}
+              confirmButtonText="학습 완료"
+          />
+      )}
       <div className="w-full h-[95vh] max-w-7xl mx-auto p-2 sm:p-6 flex flex-col sm:flex-row gap-6">
         <BibleVersePanel topic={topic} verse={bibleVerse} source={bibleVerseSource} fetchError={verseFetchError} />
         <div className="flex-1 flex flex-col bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 overflow-hidden">
@@ -292,8 +342,26 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
 
           {/* Input Form / Completion Button */}
           {isCompleted ? (
-            <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
-              <button onClick={() => onFinish(score, quizData?.questions.length || 0)} className="w-full px-5 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-500 transition-colors text-lg">학습 완료</button>
+            <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0 text-center animate-fade-in">
+                <style>{`
+                    @keyframes fade-in {
+                      from { opacity: 0; transform: translateY(10px); }
+                      to { opacity: 1; transform: translateY(0); }
+                    }
+                    .animate-fade-in {
+                      animation: fade-in 0.5s ease-out forwards;
+                    }
+                `}</style>
+                <h3 className="text-2xl font-bold text-slate-100">수고하셨습니다!</h3>
+                <p className="text-slate-300 mt-2 mb-4">
+                    퀴즈 결과: {score} / {quizData?.questions.length || 0}
+                </p>
+                <button
+                    onClick={handleRequestPrayer}
+                    disabled={isGeneratingPrayer}
+                    className="w-full max-w-xs mx-auto px-5 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-500 transition-colors text-lg disabled:bg-slate-600 disabled:cursor-wait">
+                    {isGeneratingPrayer ? '기도문 생성 중...' : '기도하기'}
+                </button>
             </div>
           ) : (
             <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
