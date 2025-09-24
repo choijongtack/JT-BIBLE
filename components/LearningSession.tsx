@@ -26,7 +26,7 @@ interface ConversationalLearningProps {
 const AI_MODEL_DISPLAY_NAMES: Record<LearningSessionState['aiModel'], string> = {
   gemini: 'Gemini 2.5 Flash',
   perplexity: 'Perplexity Sonar',
-  chatgpt: 'ChatGPT 4.0'
+  chatgpt: 'ChatGPT 4o mini'
 };
 
 const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip, onSystemBack }) => {

@@ -3,7 +3,7 @@ import { supabase, supabaseUrl } from './supabaseClient';
 import { buildSystemInstruction } from './instructionTemplate';
 import { BIBLE_METADATA } from './bibleData';
 
-const GPT_MODEL = 'gpt-4o';
+const GPT_MODEL = 'gpt-4o-mini';
 // 함수 URL은 내보낸 supabaseUrl을 사용하여 동적으로 구성됩니다.
 const PROXY_URL = `${supabaseUrl}/functions/v1/chatgpt-proxy`;
 

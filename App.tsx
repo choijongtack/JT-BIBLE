@@ -321,7 +321,7 @@ const App: React.FC = () => {
                     topic: nextTopic,
                     currentStep: LearningStep.ANALYSIS,
                     messages: [],
-                    aiModel: aiModel || 'gemini',
+                    aiModel: newSelectedModel,
                     mode: newMode,
                     bibleVerse: bibleVerse,
                     score: 0, quizData: null, currentQuestionIndex: 0
