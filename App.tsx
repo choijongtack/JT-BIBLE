@@ -1,8 +1,8 @@
 import React, { useReducer, useCallback, useEffect } from 'react';
-import type { AppStatus, LearningSessionState, Profile, Quiz } from './types';
+import type { AppStatus, LearningSessionState, Profile, Quiz, CompletionMarker } from './types';
 import { LearningStep, OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS } from './constants';
 import { BIBLE_METADATA } from './services/bibleData';
-import { parseReference } from './services/bibleUtils';
+import { parseReference, compareMarkers } from './services/bibleUtils';
 import LoginScreen from './components/LoginScreen';
 import ConversationalLearning from './components/LearningSession';
 import WelcomeScreen from './components/WelcomeScreen';
@@ -16,7 +16,7 @@ import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as g
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic } from './services/chatgptService';
 import { updateUserProgress } from './services/userDataService';
 import type { BookProgress, AiModel } from './types';
-import { getBibleVerse, getLastVerseInChapter } from './services/bibleService';
+import { getBibleVerse, getLastVerseInChapter, countVersesUpTo } from './services/bibleService';
 import { useProfileSession } from './hooks/useProfileSession';
 
 
@@ -337,17 +337,43 @@ const App: React.FC = () => {
         dispatch({ type: 'START_LOADING', payload: `학습 결과를 저장하는 중...` });
 
         const book = getBookFromTopic(activeSession.topic);
-        const currentBookProgress = profile.progress?.[book] || { lastSession: activeSession, completedTopics: [] };
+
+        const parsedTopic = parseReference(activeSession.topic);
+        if (!parsedTopic) {
+            dispatch({ type: 'SET_ERROR', payload: `완료된 주제 형식이 잘못되었습니다: ${activeSession.topic}` });
+            return;
+        }
+
+        const newMarker: CompletionMarker = {
+            book: parsedTopic.book,
+            chapter: parsedTopic.chapter,
+            verse: parsedTopic.verses[parsedTopic.verses.length - 1],
+        };
+
+        const currentBookProgress = profile.progress?.[book];
         
-        const completedTopicsSet = new Set<string>(currentBookProgress.completedTopics);
-        completedTopicsSet.add(activeSession.topic);
+        if (currentBookProgress && compareMarkers(newMarker, currentBookProgress.completionMarker) <= 0) {
+            console.log("Re-learned a topic or an older topic. No progress update needed.");
+            dispatch({ type: 'FINISH_LEARNING', payload: { debugInfo: { message: "Re-learned topic. No progress update needed." } } });
+            return;
+        }
+
+        const { count, error: countError } = await countVersesUpTo(newMarker);
+        if (countError) {
+            dispatch({ type: 'SET_ERROR', payload: `진행률을 계산할 수 없습니다: ${countError}` });
+            return;
+        }
 
         const sessionToSave: LearningSessionState = {
             ...activeSession, isComplete: true, messages: [], bibleVerse: null,
             currentStep: LearningStep.ANALYSIS, quizData: null, currentQuestionIndex: 0, score: 0
         };
 
-        const newBookProgress: BookProgress = { lastSession: sessionToSave, completedTopics: Array.from(completedTopicsSet) };
+        const newBookProgress: BookProgress = { 
+            lastSession: sessionToSave, 
+            completionMarker: newMarker, 
+            totalCompletedVerses: count 
+        };
         const result = await updateUserProgress(book, newBookProgress);
 
         if (result.error || !result.after) {
@@ -367,7 +393,11 @@ const App: React.FC = () => {
         }
 
         const book = getBookFromTopic(activeSession.topic);
-        const currentBookProgress = profile.progress?.[book] || { lastSession: activeSession, completedTopics: [] };
+        const currentBookProgress = profile.progress?.[book] || { 
+            lastSession: activeSession, 
+            completionMarker: null, 
+            totalCompletedVerses: 0 
+        };
         const sessionToSave = { ...activeSession, isComplete: false };
         const newBookProgress: BookProgress = { ...currentBookProgress, lastSession: sessionToSave };
         const result = await updateUserProgress(book, newBookProgress);

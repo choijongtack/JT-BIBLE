@@ -41,13 +41,8 @@ export const calculateVerseProgressForList = (progress: UserProgress | null | un
     Object.keys(progress).forEach(bookName => {
         if (books.includes(bookName)) {
             const bookProgress = progress[bookName];
-            if (bookProgress && Array.isArray(bookProgress.completedTopics)) {
-                const uniqueTopics = new Set(bookProgress.completedTopics);
-                uniqueTopics.forEach(topic => {
-                    const parsed = parseReference(topic);
-                    // If parsing fails, count as 0, otherwise count verses.
-                    completedVerses += parsed ? parsed.verses.length : 0;
-                });
+            if (bookProgress && bookProgress.totalCompletedVerses) {
+                completedVerses += bookProgress.totalCompletedVerses;
             }
         }
     });
@@ -59,7 +54,7 @@ export const getStudiedBookCountForList = (progress: UserProgress | null | undef
     if (!progress) return 0;
     
     return books.reduce((count, book) => {
-        if (progress[book] && progress[book]?.completedTopics?.length > 0) {
+        if (progress[book] && progress[book]?.completionMarker) {
             return count + 1;
         }
         return count;

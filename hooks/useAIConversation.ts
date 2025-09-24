@@ -62,16 +62,18 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
         const testMatchIndex = cleanedText.indexOf('[START_TEST]');
         if (testMatchIndex !== -1) {
           const textBeforeTag = cleanedText.substring(0, testMatchIndex).trim();
-          const textAfterTag = cleanedText.substring(testMatchIndex + '[START_TEST]'.length);
+          // The rest of the string from the tag onwards, to robustly find the JSON start.
+          const restOfString = cleanedText.substring(testMatchIndex);
           
           let quizJsonString = '';
           try {
-            const jsonStartIndex = textAfterTag.search(/[{\[]/);
+            // Find the start of the JSON object/array after the tag.
+            const jsonStartIndex = restOfString.search(/[{\[]/);
             if (jsonStartIndex !== -1) {
-              const textBetweenTagAndJson = textAfterTag.substring(0, jsonStartIndex).trim();
+              const textBetweenTagAndJson = restOfString.substring('[START_TEST]'.length, jsonStartIndex).trim();
               const displayText = [textBeforeTag, textBetweenTagAndJson].filter(Boolean).join('\n\n').trim();
               
-              let rawJsonString = textAfterTag.substring(jsonStartIndex);
+              let rawJsonString = restOfString.substring(jsonStartIndex);
               const lastBracket = rawJsonString.lastIndexOf(']');
               const lastBrace = rawJsonString.lastIndexOf('}');
               const jsonEndIndex = Math.max(lastBracket, lastBrace);

@@ -1,4 +1,6 @@
 
+import type { CompletionMarker } from '../types';
+
 export interface ParsedReference {
   book: string;
   chapter: number;
@@ -36,4 +38,30 @@ export function parseReference(reference: string | null | undefined): ParsedRefe
   if (isNaN(chapter) || verses.length === 0) return null;
 
   return { book, chapter, verses };
+}
+
+/**
+ * Compares two completion markers to see which is further along.
+ * @param markerA The first marker.
+ * @param markerB The second marker.
+ * @returns 1 if A > B, -1 if A < B, 0 if A === B.
+ */
+export function compareMarkers(markerA: CompletionMarker | null, markerB: CompletionMarker | null): number {
+    if (!markerA && !markerB) return 0;
+    if (!markerA) return -1; // A is less than B
+    if (!markerB) return 1;  // A is greater than B
+
+    if (markerA.book !== markerB.book) {
+        // This case should ideally not happen if we compare within the same book
+        return 0; 
+    }
+
+    if (markerA.chapter > markerB.chapter) return 1;
+    if (markerA.chapter < markerB.chapter) return -1;
+
+    // Same chapter, compare verse
+    if (markerA.verse > markerB.verse) return 1;
+    if (markerA.verse < markerB.verse) return -1;
+
+    return 0; // Markers are identical
 }

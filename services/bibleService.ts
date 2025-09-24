@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { parseReference } from './bibleUtils';
+import type { CompletionMarker } from '../types';
 
 interface BibleVerseResult {
   text: string | null;
@@ -72,5 +73,36 @@ export async function getLastVerseInChapter(book: string, chapter: number): Prom
 
     } catch (err) {
         return { lastVerse: null, error: err instanceof Error ? err.message : "Unknown error" };
+    }
+}
+
+export async function countVersesUpTo(marker: CompletionMarker): Promise<{ count: number; error: string | null }> {
+    try {
+        const { book, chapter, verse } = marker;
+
+        const { count: prevChaptersCount, error: prevChaptersError } = await supabase
+            .from('verses')
+            .select('*', { count: 'exact', head: true })
+            .eq('book', book)
+            .lt('chapter', chapter);
+
+        if (prevChaptersError) {
+            return { count: 0, error: `Error counting previous chapters: ${prevChaptersError.message}` };
+        }
+
+        const { count: currentChapterCount, error: currentChapterError } = await supabase
+            .from('verses')
+            .select('*', { count: 'exact', head: true })
+            .eq('book', book)
+            .eq('chapter', chapter)
+            .lte('verse', verse);
+
+        if (currentChapterError) {
+            return { count: 0, error: `Error counting current chapter: ${currentChapterError.message}` };
+        }
+
+        return { count: (prevChaptersCount || 0) + (currentChapterCount || 0), error: null };
+    } catch (err) {
+        return { count: 0, error: err instanceof Error ? err.message : "Unknown error while counting verses" };
     }
 }

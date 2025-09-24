@@ -198,7 +198,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
         const isSelected = selectedBook === book;
         const bookProgress = profile?.progress?.[book];
         const isInProgress = bookProgress?.lastSession && !bookProgress.lastSession.isComplete;
-        const hasCompletedTopics = bookProgress && bookProgress.completedTopics.length > 0;
+        const hasCompletedTopics = bookProgress && bookProgress.completionMarker;
 
         return (
             <button

@@ -172,7 +172,8 @@ export const testUpdateProgress = async () => {
     
     const testBookProgress: BookProgress = {
       lastSession: testSession,
-      completedTopics: [`${testBook} 1:1-5`]
+      completionMarker: { book: testBook, chapter: 1, verse: 5 },
+      totalCompletedVerses: 5
     };
 
     alert("Sending test update. Check your browser's developer console (F12) for detailed debug info.");

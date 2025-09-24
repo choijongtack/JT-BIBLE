@@ -48,10 +48,19 @@ export interface LearningSessionState {
   isComplete?: boolean;
 }
 
+// 마지막으로 완료된 학습 지점을 표시하는 새 구조
+export interface CompletionMarker {
+  book: string;
+  chapter: number;
+  verse: number;
+}
+
+
 // 각 책의 진행 상황을 더 자세히 추적하기 위한 새 인터페이스
 export interface BookProgress {
   lastSession: LearningSessionState;
-  completedTopics: string[];
+  completionMarker: CompletionMarker | null;
+  totalCompletedVerses: number;
 }
 
 export interface UserProgress {
