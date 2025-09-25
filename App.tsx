@@ -207,126 +207,134 @@ const App: React.FC = () => {
     }, [authStatus, profile, status]);
 
 
-    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, mode?: 'general' | 'advanced') => {
-        dispatch({ type: 'START_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
+    const resumeLearningSession = useCallback((sessionToResume: LearningSessionState, mode?: 'general' | 'advanced') => {
+        dispatch({ type: 'START_LOADING', payload: `'${sessionToResume.topic}' 학습을 다시 시작합니다...` });
+        const finalMode = mode ?? sessionToResume.mode ?? 'general';
+        const sessionToStart = { ...sessionToResume, mode: finalMode };
+        dispatch({ type: 'START_LEARNING', payload: sessionToStart });
+    }, []);
 
+    const startNewLearningSession = useCallback(async (book: string, aiModel: AiModel, mode: 'general' | 'advanced') => {
         try {
-            const savedBookProgress = profile?.progress?.[book];
-            let savedSession = savedBookProgress?.lastSession;
+            const savedSession = profile?.progress?.[book]?.lastSession;
+            const finalAiModel = aiModel;
+            const finalMode = mode;
+            
+            let nextTopic: string;
+            let bibleVerse: string | null;
+            
+            const isNextTopic = savedSession?.isComplete;
+            const topicToGet = isNextTopic ? savedSession.topic : book;
+            
+            if (isNextTopic) {
+                const lastTopicRef = parseReference(topicToGet);
+                const bookMeta = BIBLE_METADATA[book];
 
-            if (savedSession && (typeof savedSession.topic !== 'string' || !savedSession.topic)) {
-                savedSession = undefined;
+                if (lastTopicRef && bookMeta) {
+                    const lastVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
+                    if (lastTopicRef.chapter === bookMeta.chapters && lastVerse >= bookMeta.versesInLastChapter) {
+                        dispatch({ type: 'OPEN_COMPLETED_MODAL', payload: book });
+                        return;
+                    }
+                }
             }
+            
+            dispatch({ type: 'START_LOADING', payload: `'${topicToGet}'${isNextTopic ? ' 다음' : '의 첫'} 주제를 찾는 중...` });
 
-            let sessionToStart: LearningSessionState;
-            const newMode = mode || savedSession?.mode || 'general';
-
-            if (savedSession && !savedSession.isComplete) {
-                dispatch({ type: 'START_LOADING', payload: `'${savedSession.topic}' 학습을 다시 시작합니다...` });
-                sessionToStart = { ...savedSession, mode: newMode };
+            if (finalAiModel === 'perplexity') {
+                nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, book) : await getPerplexityStudyTopic(topicToGet);
+            } else if (finalAiModel === 'chatgpt') {
+                nextTopic = isNextTopic ? await getNextChatGptStudyTopic(topicToGet, book) : await getChatGptStudyTopic(topicToGet);
             } else {
-                let nextTopic: string;
-                let bibleVerse: string | null;
-                
-                const isNextTopic = savedSession?.isComplete;
-                const topicToGet = isNextTopic ? savedSession.topic : book;
-                
-                if (isNextTopic) {
-                    const lastTopicRef = parseReference(topicToGet);
-                    const bookMeta = BIBLE_METADATA[book];
-
-                    if (lastTopicRef && bookMeta) {
-                        const lastVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
-                        if (lastTopicRef.chapter === bookMeta.chapters && lastVerse >= bookMeta.versesInLastChapter) {
-                            dispatch({ type: 'OPEN_COMPLETED_MODAL', payload: book });
-                            return;
-                        }
-                    }
-                }
-                
-                dispatch({ type: 'START_LOADING', payload: `'${topicToGet}'${isNextTopic ? ' 다음' : '의 첫'} 주제를 찾는 중...` });
-                const newSelectedModel = aiModel || 'gemini';
-
-                if (newSelectedModel === 'perplexity') {
-                    nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, book) : await getPerplexityStudyTopic(topicToGet);
-                } else if (newSelectedModel === 'chatgpt') {
-                    // FIX: Corrected a typo where `getNextChatGptStudyTopic` was called with one argument instead of `getChatGptStudyTopic`.
-                    nextTopic = isNextTopic ? await getNextChatGptStudyTopic(topicToGet, book) : await getChatGptStudyTopic(topicToGet);
-                } else {
-                    nextTopic = isNextTopic ? await getNextGeminiStudyTopic(topicToGet, book) : await getGeminiStudyTopic(topicToGet);
-                }
-
-                dispatch({ type: 'START_LOADING', payload: `'${nextTopic}' 본문을 불러오는 중...` });
-                const verseResult = await getBibleVerse(nextTopic);
-
-                if (verseResult.error) {
-                    console.warn(`AI가 제안한 토픽('${nextTopic}') 조회 실패. Fallback 로직 실행. 오류:`, verseResult.error);
-                    dispatch({ type: 'START_LOADING', payload: `AI 추천(${nextTopic})이 유효하지 않아 다음 주제를 직접 계산합니다...` });
-
-                    let correctedTopic: string | null = null;
-                    const lastTopicRef = parseReference(topicToGet);
-                    const bookMeta = BIBLE_METADATA[book];
-                    const maxStep = 5;
-
-                    if (lastTopicRef && bookMeta) {
-                        const lastStudiedChapter = lastTopicRef.chapter;
-                        const lastStudiedVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
-
-                        const { lastVerse: finalVerseInChapter, error: verseError } = await getLastVerseInChapter(book, lastStudiedChapter);
-
-                        if (verseError || finalVerseInChapter === null) {
-                            throw new Error(`다음 주제를 계산하지 못했습니다: ${book} ${lastStudiedChapter}의 마지막 절을 찾을 수 없습니다. 오류: ${verseError}`);
-                        }
-
-                        if (lastStudiedVerse < finalVerseInChapter) {
-                            // We are in the same chapter
-                            const nextStart = lastStudiedVerse + 1;
-                            const nextEnd = Math.min(nextStart + maxStep - 1, finalVerseInChapter);
-                            const range = nextStart === nextEnd ? `${nextStart}` : `${nextStart}-${nextEnd}`;
-                            correctedTopic = `${book} ${lastStudiedChapter}:${range}`;
-                        } else if (lastStudiedChapter < bookMeta.chapters) {
-                            // We need to move to the next chapter
-                            const nextChapter = lastStudiedChapter + 1;
-                            correctedTopic = `${book} ${nextChapter}:1-${maxStep}`;
-                        } else {
-                            // This is the last verse of the last chapter. The book is complete.
-                            dispatch({ type: 'OPEN_COMPLETED_MODAL', payload: book });
-                            return; // exit the function
-                        }
-                    }
-
-                    if (!correctedTopic) {
-                        throw new Error(`AI가 잘못된 다음 주제('${nextTopic}')를 반환했으며, 시스템이 대체 주제를 생성하지 못했습니다.`);
-                    }
-
-                    nextTopic = correctedTopic;
-                    dispatch({ type: 'START_LOADING', payload: `대체 주제 '${nextTopic}' 본문을 불러오는 중...` });
-                    const retryResult = await getBibleVerse(nextTopic);
-                    if (retryResult.error) {
-                        throw new Error(`대체 주제('${nextTopic}') 조회에 실패했습니다: ${retryResult.error}`);
-                    }
-                    bibleVerse = retryResult.text;
-
-                } else {
-                    bibleVerse = verseResult.text;
-                }
-
-                sessionToStart = {
-                    topic: nextTopic,
-                    currentStep: LearningStep.ANALYSIS,
-                    messages: [],
-                    aiModel: newSelectedModel,
-                    mode: newMode,
-                    bibleVerse: bibleVerse,
-                    score: 0, quizData: null, currentQuestionIndex: 0
-                };
+                nextTopic = isNextTopic ? await getNextGeminiStudyTopic(topicToGet, book) : await getGeminiStudyTopic(topicToGet);
             }
+
+            dispatch({ type: 'START_LOADING', payload: `'${nextTopic}' 본문을 불러오는 중...` });
+            const verseResult = await getBibleVerse(nextTopic);
+
+            if (verseResult.error) {
+                console.warn(`AI가 제안한 토픽('${nextTopic}') 조회 실패. Fallback 로직 실행. 오류:`, verseResult.error);
+                dispatch({ type: 'START_LOADING', payload: `AI 추천(${nextTopic})이 유효하지 않아 다음 주제를 직접 계산합니다...` });
+
+                let correctedTopic: string | null = null;
+                const lastTopicRef = parseReference(topicToGet);
+                const bookMeta = BIBLE_METADATA[book];
+                const maxStep = 5;
+
+                if (lastTopicRef && bookMeta) {
+                    const lastStudiedChapter = lastTopicRef.chapter;
+                    const lastStudiedVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
+
+                    const { lastVerse: finalVerseInChapter, error: verseError } = await getLastVerseInChapter(book, lastStudiedChapter);
+
+                    if (verseError || finalVerseInChapter === null) {
+                        throw new Error(`다음 주제를 계산하지 못했습니다: ${book} ${lastStudiedChapter}의 마지막 절을 찾을 수 없습니다. 오류: ${verseError}`);
+                    }
+
+                    if (lastStudiedVerse < finalVerseInChapter) {
+                        const nextStart = lastStudiedVerse + 1;
+                        const nextEnd = Math.min(nextStart + maxStep - 1, finalVerseInChapter);
+                        const range = nextStart === nextEnd ? `${nextStart}` : `${nextStart}-${nextEnd}`;
+                        correctedTopic = `${book} ${lastStudiedChapter}:${range}`;
+                    } else if (lastStudiedChapter < bookMeta.chapters) {
+                        const nextChapter = lastStudiedChapter + 1;
+                        correctedTopic = `${book} ${nextChapter}:1-${maxStep}`;
+                    } else {
+                        dispatch({ type: 'OPEN_COMPLETED_MODAL', payload: book });
+                        return;
+                    }
+                }
+
+                if (!correctedTopic) {
+                    throw new Error(`AI가 잘못된 다음 주제('${nextTopic}')를 반환했으며, 시스템이 대체 주제를 생성하지 못했습니다.`);
+                }
+
+                nextTopic = correctedTopic;
+                dispatch({ type: 'START_LOADING', payload: `대체 주제 '${nextTopic}' 본문을 불러오는 중...` });
+                const retryResult = await getBibleVerse(nextTopic);
+                if (retryResult.error) {
+                    throw new Error(`대체 주제('${nextTopic}') 조회에 실패했습니다: ${retryResult.error}`);
+                }
+                bibleVerse = retryResult.text;
+
+            } else {
+                bibleVerse = verseResult.text;
+            }
+
+            const sessionToStart: LearningSessionState = {
+                topic: nextTopic,
+                currentStep: LearningStep.ANALYSIS,
+                messages: [],
+                aiModel: finalAiModel,
+                mode: finalMode,
+                bibleVerse: bibleVerse,
+                score: 0, quizData: null, currentQuestionIndex: 0
+            };
             dispatch({ type: 'START_LEARNING', payload: sessionToStart });
         } catch (e) {
-            const message = e instanceof Error ? e.message : '학습 세션을 시작하는 데 실패했습니다.';
+            const message = e instanceof Error ? e.message : '새 학습 세션을 시작하는 데 실패했습니다.';
             dispatch({ type: 'SET_ERROR', payload: message });
         }
-    }, [profile, status]);
+    }, [profile]);
+
+    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, mode?: 'general' | 'advanced') => {
+        dispatch({ type: 'START_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
+    
+        const savedBookProgress = profile?.progress?.[book];
+        let savedSession = savedBookProgress?.lastSession;
+    
+        if (savedSession && (typeof savedSession.topic !== 'string' || !savedSession.topic)) {
+            savedSession = undefined;
+        }
+    
+        if (savedSession && !savedSession.isComplete) {
+            resumeLearningSession(savedSession, mode);
+        } else {
+            const finalAiModel = aiModel ?? savedSession?.aiModel ?? 'gemini';
+            const finalMode = mode ?? savedSession?.mode ?? 'general';
+            await startNewLearningSession(book, finalAiModel, finalMode);
+        }
+    }, [profile, resumeLearningSession, startNewLearningSession]);
 
     const handleFinishLearning = useCallback(async () => {
         if (!activeSession || !profile || !activeSession.topic) {

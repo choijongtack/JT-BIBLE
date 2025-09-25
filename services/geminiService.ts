@@ -42,7 +42,9 @@ const callGeminiProxy = async (payload: object): Promise<string> => {
 };
 
 const toGeminiHistory = (history: ChatMessage[]) => {
-    return history.map(msg => ({
+    // FIX: Filter out system messages. The Gemini API expects system instructions
+    // to be passed in a separate `systemInstruction` parameter, not within the message history.
+    return history.filter(msg => msg.role !== 'system').map(msg => ({
         // The REST API uses 'model' for the assistant's role.
         role: msg.role === 'model' ? 'model' : 'user',
         parts: [{ text: msg.content }]

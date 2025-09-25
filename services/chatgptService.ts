@@ -3,7 +3,7 @@ import { supabase, supabaseUrl } from './supabaseClient';
 import { buildSystemInstruction } from './instructionTemplate';
 import { BIBLE_METADATA } from './bibleData';
 
-const GPT_MODEL = 'gpt-4o-mini';
+const GPT_MODEL = 'gpt-4o';
 // 함수 URL은 내보낸 supabaseUrl을 사용하여 동적으로 구성됩니다.
 const PROXY_URL = `${supabaseUrl}/functions/v1/chatgpt-proxy`;
 
@@ -155,19 +155,14 @@ export const getNextStudyTopic = async (currentTopic: string, bookName: string):
     }
 };
 
-const buildHistory = (systemInstruction: string, existingMessages: ChatMessage[]): {role: 'system' | 'user' | 'assistant'; content: string}[] => {
-    const history: {role: 'system' | 'user' | 'assistant'; content: string}[] = [{ role: 'system', content: systemInstruction }];
-    existingMessages.forEach(msg => history.push({ role: msg.role === 'model' ? 'assistant' : 'user', content: msg.content }));
-    return history;
-}
-
-export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string, topic: string, mode: 'general' | 'advanced'): Promise<string> => {
+export const continueLearningConversation = async (
+    currentHistory: {role: 'system' | 'user' | 'assistant'; content: string}[], 
+    message: string
+): Promise<string> => {
     try {
-        const systemInstruction = buildSystemInstruction(topic, mode);
-        const messages = buildHistory(systemInstruction, currentHistory);
-        messages.push({ role: 'user', content: message });
+        const messagesWithNew = [...currentHistory, { role: 'user' as const, content: message }];
         
-        const data = await callChatGptCompletion({ model: GPT_MODEL, messages });
+        const data = await callChatGptCompletion({ model: GPT_MODEL, messages: messagesWithNew });
 
         return data.choices[0].message.content;
 

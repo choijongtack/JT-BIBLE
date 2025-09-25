@@ -16,47 +16,41 @@ interface QuizCardProps {
 
 const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQuestions, onSubmit, onNext, onSkip, aiFeedback, isEvaluating }) => {
   const [userAnswers, setUserAnswers] = useState<string[]>([]);
+  // FIX: 부모로부터 받은 question prop을 직접 수정하지 않기 위해 내부 상태(internalQuestion)를 생성합니다.
+  // 이렇게 하면 React의 데이터 흐름 규칙을 준수하여 안정성을 높일 수 있습니다.
+  const [internalQuestion, setInternalQuestion] = useState<QuizQuestion>(question);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
 
   useEffect(() => {
-    console.log('=== QuizCard Debug ===');
-    console.log('Question:', question);
-    console.log('Question type:', question.type);
-    console.log('QuestionType.FILL_IN_THE_BLANK:', QuestionType.FILL_IN_THE_BLANK);
-    console.log('Type match:', question.type === QuestionType.FILL_IN_THE_BLANK);
-  
-    if (question.type === QuestionType.FILL_IN_THE_BLANK) {
-      const q = question as import('../types').FillInTheBlankQuestion;
-      console.log('verseTextParts:', q.verseTextParts);
+    // prop으로 받은 question이 변경될 때마다 내부 상태를 안전하게 업데이트합니다.
+    // JSON.parse(JSON.stringify(...))는 prop의 '깊은 복사본'을 만들어 직접적인 수정을 방지합니다.
+    const questionCopy = JSON.parse(JSON.stringify(question)) as QuizQuestion;
+
+    if (questionCopy.type === QuestionType.FILL_IN_THE_BLANK) {
+      const q = questionCopy as import('../types').FillInTheBlankQuestion;
       let blankCount = q.verseTextParts.filter(p => p === '___').length;
 
-    // --- 🔥 방어 로직: blanks가 없는데 answers는 있는 경우 ---
+      // --- 🔥 방어 로직: AI가 빈칸 없는 문제를 생성한 경우, 복사본을 수정하여 안전하게 처리합니다. ---
       if (blankCount === 0 && q.answers.length > 0) {
-        console.warn("⚠ verseTextParts에 blank 없음. 강제로 blanks 삽입.");
-        q.verseTextParts = [q.verseTextParts.join(' '), ...Array(q.answers.length).fill('___')];
+        q.verseTextParts.push(...Array(q.answers.length).fill('___'));
         blankCount = q.answers.length;
       }
-
-      console.log('Blank count (final):', blankCount);
       setUserAnswers(Array(blankCount).fill(''));
     } else {
-      console.log('Setting single answer');
       setUserAnswers(['']);
     }
+
+    setInternalQuestion(questionCopy);
     setIsSubmitted(false);
     setIsCorrect(false);
   }, [question]);
 
     
   const handleInputChange = (index: number, value: string) => {
-    console.log(`Input change - Index: ${index}, Value: "${value}"`);
-    console.log('Current userAnswers:', userAnswers);
-  
     setUserAnswers(currentAnswers => {
       const newAnswers = [...currentAnswers];
       newAnswers[index] = value;
-      console.log('New userAnswers:', newAnswers);
       return newAnswers;
     });
   };
@@ -71,7 +65,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
   };
 
   const renderFillInTheBlank = () => {
-    const q = question as import('../types').FillInTheBlankQuestion;
+    const q = internalQuestion as import('../types').FillInTheBlankQuestion;
     let answerIndex = 0;
     return (
       <div className="text-lg/relaxed sm:text-xl/relaxed text-slate-300 flex flex-wrap items-baseline gap-x-2 gap-y-4">
@@ -98,7 +92,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
   };
 
   const renderQuestionAnswer = () => {
-    const q = question as import('../types').QAQuestion;
+    const q = internalQuestion as import('../types').QAQuestion;
     return (
       <div>
         <p className="text-lg/relaxed sm:text-xl/relaxed text-slate-300 mb-4">{q.question}</p>
@@ -117,7 +111,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
   const renderFeedback = () => {
     if (!isSubmitted) return null;
 
-    if (question.type === QuestionType.QUESTION_ANSWER) {
+    if (internalQuestion.type === QuestionType.QUESTION_ANSWER) {
       if (isEvaluating) {
         return (
           <div className="mt-4 p-4 rounded-lg bg-slate-700/50 border border-slate-600 flex items-center justify-center gap-3">
@@ -137,7 +131,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
       return null;
     }
 
-    const correctAnswers = question.answers.join(', ');
+    const correctAnswers = internalQuestion.answers.join(', ');
 
     if (isCorrect) {
       return (
@@ -162,20 +156,20 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
   const canSubmit = userAnswers.length > 0 && userAnswers.every(answer => answer.trim() !== '');
   
   const showNextButton = isSubmitted && (
-    question.type === QuestionType.FILL_IN_THE_BLANK || 
-    (question.type === QuestionType.QUESTION_ANSWER && !!aiFeedback && !isEvaluating)
+    internalQuestion.type === QuestionType.FILL_IN_THE_BLANK || 
+    (internalQuestion.type === QuestionType.QUESTION_ANSWER && !!aiFeedback && !isEvaluating)
   );
 
   return (
     <div className="w-full max-w-3xl mx-auto bg-slate-800/50 p-6 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
       <div className="mb-6">
-        <p className="text-sm font-medium text-blue-400">{question.verseReference}</p>
+        <p className="text-sm font-medium text-blue-400">{internalQuestion.verseReference}</p>
         <p className="text-slate-400 text-sm">문제 {questionNumber} / {totalQuestions}</p>
       </div>
       
       <form onSubmit={handleSubmit}>
         <div className="space-y-4">
-          {question.type === QuestionType.FILL_IN_THE_BLANK ? renderFillInTheBlank() : renderQuestionAnswer()}
+          {internalQuestion.type === QuestionType.FILL_IN_THE_BLANK ? renderFillInTheBlank() : renderQuestionAnswer()}
         </div>
 
         {renderFeedback()}
@@ -194,7 +188,7 @@ const QuizCard: React.FC<QuizCardProps> = ({ question, questionNumber, totalQues
               disabled={!canSubmit || isEvaluating}
               className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
             >
-              {question.type === QuestionType.QUESTION_ANSWER ? '평가 요청' : '정답 확인'}
+              {internalQuestion.type === QuestionType.QUESTION_ANSWER ? '평가 요청' : '정답 확인'}
             </button>
           ) : (
             showNextButton && (

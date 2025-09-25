@@ -29,7 +29,9 @@ export interface Quiz {
 export type AppStatus = 'login' | 'idle' | 'loading' | 'learning' | 'finished' | 'error' | 'awaiting-confirmation' | 'profile_error';
 
 export type ChatMessage = {
-  role: 'user' | 'model';
+  // FIX: Expanded `role` to include 'system' to properly handle chat history for models
+  // that use a system prompt (e.g., ChatGPT, Perplexity).
+  role: 'user' | 'model' | 'system';
   content: string;
 };
 

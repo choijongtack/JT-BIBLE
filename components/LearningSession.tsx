@@ -31,7 +31,7 @@ interface ConversationalLearningProps {
 const AI_MODEL_DISPLAY_NAMES: Record<LearningSessionState['aiModel'], string> = {
   gemini: 'Gemini 2.5 Flash',
   perplexity: 'Perplexity Sonar',
-  chatgpt: 'ChatGPT 4o mini'
+  chatgpt: 'ChatGPT 4o'
 };
 
 const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip, onSystemBack }) => {
@@ -162,26 +162,49 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   };
 
   const handleForceStepChange = (step: LearningStep) => {
+    if (currentStep === step) return;
+    
+    // 낙관적 UI 업데이트: AI 응답을 기다리지 않고 즉시 UI를 변경하여 반응성을 높입니다.
+    setCurrentStep(step);
+    
     const message = `[사용자 액션] '${step}' 단계로 강제 이동합니다.`;
-    // System-driven commands must strictly adhere to the current passage.
+    // 시스템 주도 명령어는 현재 구절만 참조해야 합니다.
     sendMessage(message, { enforcePassageOnly: true });
   };
-  
+
   const handleAdvanceStepRequest = () => {
-    const isTestStep = currentStep === LearningStep.MEMORIZE_AND_TEST || currentStep === LearningStep.TEST;
-    const isPreTestStep = 
+    const isPreTestStep =
       (mode === 'general' && currentStep === LearningStep.APPLICATION) ||
       (mode === 'advanced' && currentStep === LearningStep.MEMORIZATION);
-
-    let message = "준비되었습니다. 다음 단계로 넘어가 주세요.";
-
-    if ((isPreTestStep || isTestStep) && !quizData) {
-      message = bibleVerse
+  
+    // '시험' 단계로 넘어갈 때는 특별한 퀴즈 생성 프롬프트가 필요합니다.
+    // 이 경우, AI가 유효한 퀴즈를 생성했을 때만 단계가 변경되므로 낙관적 업데이트를 사용하지 않습니다.
+    if (isPreTestStep && !quizData) {
+      const message = bibleVerse
         ? `이전 단계 학습이 완료되었습니다. 이제 시험을 시작하겠습니다. 시스템 지침에 따라 '${topic}' 본문에 대한 퀴즈 JSON을 생성해주세요.\n\n퀴즈의 모든 내용은 반드시 아래 제공된 성경 본문만을 사용하여 생성해야 합니다. 다른 구절을 참조하면 생성된 퀴즈가 거부됩니다.\n\n[퀴즈 출제용 본문: ${topic}]\n---\n${bibleVerse}\n---`
         : `이전 단계 학습이 완료되었습니다. 이제 시험을 시작하겠습니다. 시스템 지침에 따라 '${topic}' 본문에 대한 퀴즈 JSON을 생성해주세요.`;
+      sendMessage(message, { enforcePassageOnly: true });
+      return;
     }
-    // System-driven commands must strictly adhere to the current passage.
-    sendMessage(message, { enforcePassageOnly: true });
+  
+    // '관찰' -> '해석'과 같은 일반적인 단계 전환의 경우입니다.
+    const allSteps = Object.values(LearningStep);
+    const modeSteps = mode === 'general' ? allSteps.slice(0, 4) : allSteps.slice(4);
+    const currentIndex = modeSteps.indexOf(currentStep);
+  
+    if (currentIndex < modeSteps.length - 1) {
+      const nextStep = modeSteps[currentIndex + 1];
+      
+      // 낙관적 UI 업데이트: UI 상태를 즉시 변경합니다.
+      setCurrentStep(nextStep);
+      
+      // AI에게 사용자가 단계를 변경했음을 알립니다.
+      const message = `[사용자 액션] 사용자가 다음 단계인 '${nextStep}'로 이동했습니다. 이 단계에 맞는 첫 번째 질문을 시작해주세요.`;
+      sendMessage(message, { enforcePassageOnly: true });
+    } else {
+      // 이미 마지막 단계에 있는 경우에 대한 fallback 처리입니다.
+      sendMessage("현재 마지막 단계입니다. 퀴즈를 풀어주세요.", { enforcePassageOnly: true });
+    }
   };
   
   const handleQuizSubmit = useCallback((userAnswers: string[]): boolean => {
