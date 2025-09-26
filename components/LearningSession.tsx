@@ -327,9 +327,9 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
             </div>
             
             <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
-              <StepControl onStepSelect={handleForceStepChange} currentStep={currentStep} isLoading={isLoading} mode={mode} />
-              <button onClick={handleAdvanceStepRequest} disabled={isLoading} className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-500 disabled:bg-slate-600 transition-colors">다음 단계로</button>
-              <button onClick={onSaveAndExit} className="px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">저장 후 종료</button>
+              <StepControl onStepSelect={handleForceStepChange} currentStep={currentStep} isLoading={isLoading || isCompleted} mode={mode} />
+              <button onClick={handleAdvanceStepRequest} disabled={isLoading || isCompleted} className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-500 disabled:bg-slate-600 transition-colors">다음 단계로</button>
+              <button onClick={onSaveAndExit} disabled={isCompleted} className="px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors disabled:text-slate-500 disabled:bg-transparent disabled:cursor-not-allowed">저장 후 종료</button>
             </div>
 
             <div className="relative sm:hidden flex-shrink-0" ref={optionsMenuRef}>
@@ -339,9 +339,9 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
               {isOptionsOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-10 animate-fade-in-fast">
                   <ul className="py-1" role="menu">
-                    <li role="none"><button onClick={() => { setIsOptionsOpen(false); setIsStepModalOpen(true); }} disabled={isLoading} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 disabled:text-slate-500" role="menuitem">단계 이동</button></li>
-                    <li role="none"><button onClick={() => { handleAdvanceStepRequest(); setIsOptionsOpen(false); }} disabled={isLoading} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 disabled:text-slate-500" role="menuitem">다음 단계로</button></li>
-                    <li role="none"><button onClick={() => { onSaveAndExit(); setIsOptionsOpen(false); }} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700" role="menuitem">저장 후 종료</button></li>
+                    <li role="none"><button onClick={() => { setIsOptionsOpen(false); setIsStepModalOpen(true); }} disabled={isLoading || isCompleted} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 disabled:text-slate-500" role="menuitem">단계 이동</button></li>
+                    <li role="none"><button onClick={() => { handleAdvanceStepRequest(); setIsOptionsOpen(false); }} disabled={isLoading || isCompleted} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 disabled:text-slate-500" role="menuitem">다음 단계로</button></li>
+                    <li role="none"><button onClick={() => { onSaveAndExit(); setIsOptionsOpen(false); }} disabled={isCompleted} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 disabled:text-slate-500" role="menuitem">저장 후 종료</button></li>
                   </ul>
                 </div>
               )}
