@@ -244,6 +244,9 @@ const App: React.FC = () => {
             if (finalAiModel === 'perplexity') {
                 nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, book) : await getPerplexityStudyTopic(topicToGet);
             } else if (finalAiModel === 'chatgpt') {
+// FIX: Corrected a function call that was causing a runtime error.
+// The `getNextChatGptStudyTopic` function expects two arguments, but was being called with one when a new session was started.
+// This has been changed to `getChatGptStudyTopic`, which correctly handles fetching the first topic for a book.
                 nextTopic = isNextTopic ? await getNextChatGptStudyTopic(topicToGet, book) : await getChatGptStudyTopic(topicToGet);
             } else {
                 nextTopic = isNextTopic ? await getNextGeminiStudyTopic(topicToGet, book) : await getGeminiStudyTopic(topicToGet);
@@ -464,11 +467,29 @@ const App: React.FC = () => {
     const renderContent = () => {
         switch (status) {
             case 'loading':
+            case 'idle':
+                // Show a generic spinner only when loading with an active session (e.g., saving).
+                if (status === 'loading' && activeSession) {
+                    return (
+                        <div className="text-center">
+                            <div className="w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                            <p className="text-slate-300">{loadingMessage}</p>
+                        </div>
+                    );
+                }
+                // For 'idle' or 'loading' without an active session, render WelcomeScreen.
+                // WelcomeScreen will handle its own loading overlay based on the 'status' prop.
                 return (
-                    <div className="text-center">
-                        <div className="w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                        <p className="text-slate-300">{loadingMessage}</p>
-                    </div>
+                    <WelcomeScreen
+                        status={status}
+                        loadingMessage={loadingMessage}
+                        onStart={handleStartLearning}
+                        profile={profile}
+                        onLogout={logout}
+                        onDelete={() => dispatch({ type: 'OPEN_DELETE_MODAL' })}
+                        onGptKeySaved={handleGptKeySaved}
+                        onPerplexityKeySaved={handlePerplexityKeySaved}
+                    />
                 );
             case 'login':
                 return <LoginScreen onLogin={login} onRegister={register} error={authError} />;
@@ -476,17 +497,6 @@ const App: React.FC = () => {
                 return <AwaitingConfirmationScreen onBackToLogin={() => dispatch({ type: 'SET_AUTH_STATUS', payload: 'login' })} />;
             case 'profile_error':
                  return <ProfileErrorScreen error={authError || "알 수 없는 프로필 오류가 발생했습니다."} onLogout={logout} />;
-            case 'idle':
-                return (
-                    <WelcomeScreen 
-                        onStart={handleStartLearning} 
-                        profile={profile} 
-                        onLogout={logout} 
-                        onDelete={() => dispatch({ type: 'OPEN_DELETE_MODAL' })} 
-                        onGptKeySaved={handleGptKeySaved}
-                        onPerplexityKeySaved={handlePerplexityKeySaved}
-                    />
-                );
             case 'learning':
                 if (!activeSession) {
                      dispatch({ type: 'GO_TO_IDLE' });

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { AiModel, Profile } from '../types';
-import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX } from '../constants';
+import type { AiModel, Profile, AppStatus } from '../types';
+import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX, IconLoader } from '../constants';
 import { savePerplexityApiKey } from '../services/perplexityService';
 import { saveChatGptApiKey } from '../services/chatgptService';
 import { calculateVerseProgressForList } from '../services/bibleData';
@@ -8,6 +8,8 @@ import { calculateVerseProgressForList } from '../services/bibleData';
 type ApiKeyStatus = 'unsaved' | 'saving' | 'saved' | 'error' | 'editing';
 
 interface WelcomeScreenProps {
+    status: AppStatus;
+    loadingMessage: string;
     onStart: (book: string, aiModel: AiModel, mode?: 'general' | 'advanced') => void;
     profile: Profile | null;
     onLogout: () => void;
@@ -50,7 +52,8 @@ const StatProgressBar: React.FC<{
     );
 };
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status, loadingMessage, onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved }) => {
+    const isLoading = status === 'loading';
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
     
@@ -231,7 +234,15 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
     const bookLastTopic = profile?.progress?.[selectedBook || '']?.lastSession?.topic;
 
     return (
-        <div className="w-full max-w-4xl mx-auto bg-slate-800/50 p-4 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
+        <div className="relative w-full max-w-4xl mx-auto bg-slate-800/50 p-4 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
+             {/* --- Loading Overlay --- */}
+            {isLoading && (
+                <div className="absolute inset-0 bg-slate-800/80 backdrop-blur-sm flex flex-col items-center justify-center z-30 rounded-2xl animate-fade-in">
+                    <IconLoader className="w-12 h-12 text-blue-400 animate-spin mb-4" />
+                    <p className="text-slate-300 text-lg text-center px-4">{loadingMessage}</p>
+                </div>
+            )}
+
             <header className="flex flex-col items-center sm:flex-row sm:justify-between mb-8">
                 <div className="hidden sm:block sm:flex-1" />
                 <div className="text-center">
