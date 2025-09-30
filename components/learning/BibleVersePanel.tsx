@@ -68,7 +68,7 @@ const BibleVersePanel: React.FC<{ topic: string, verse: string | null, source: '
         source={source}
         fetchError={fetchError}
       />
-      <div className="w-full sm:w-1/3 flex-shrink-0 sm:h-auto bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 flex flex-col">
+      <div className="hidden sm:flex flex-col w-full sm:w-1/3 flex-shrink-0 sm:h-auto bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700">
         <div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center flex-shrink-0">
             <div className="flex items-baseline gap-3">
                 <h2 className="text-lg sm:text-xl font-bold text-slate-100">{topic} 본문</h2>

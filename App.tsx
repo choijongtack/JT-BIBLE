@@ -306,7 +306,7 @@ const App: React.FC = () => {
 
             const sessionToStart: LearningSessionState = {
                 topic: nextTopic,
-                currentStep: LearningStep.ANALYSIS,
+                currentStep: finalMode === 'advanced' ? LearningStep.ANALYSIS : LearningStep.OBSERVATION,
                 messages: [],
                 aiModel: finalAiModel,
                 mode: finalMode,
@@ -329,10 +329,24 @@ const App: React.FC = () => {
         if (savedSession && (typeof savedSession.topic !== 'string' || !savedSession.topic)) {
             savedSession = undefined;
         }
+        
+        const isInProgress = savedSession && !savedSession.isComplete;
+
+        if (isInProgress) {
+            // 진행 중인 세션이 있습니다.
+            const isModeConflict = mode && savedSession.mode && savedSession.mode !== mode;
     
-        if (savedSession && !savedSession.isComplete) {
-            resumeLearningSession(savedSession, mode);
+            if (isModeConflict) {
+                // UI에서 이 경우가 발생하지 않도록 막지만, 안전장치로 로직을 추가합니다.
+                // 충돌하는 모드 요청 시, 로딩 상태를 취소하고 아무것도 하지 않습니다.
+                console.warn(`'${book}'에 대해 충돌하는 학습 모드로 시작하려는 시도가 무시되었습니다.`);
+                dispatch({ type: 'GO_TO_IDLE' }); 
+                return;
+            }
+            // 충돌이 없으므로 세션을 이어갑니다.
+            resumeLearningSession(savedSession, mode ?? savedSession.mode);
         } else {
+            // 진행 중인 세션이 없으므로 새 세션을 시작합니다.
             const finalAiModel = aiModel ?? savedSession?.aiModel ?? 'gemini';
             const finalMode = mode ?? savedSession?.mode ?? 'general';
             await startNewLearningSession(book, finalAiModel, finalMode);
@@ -374,10 +388,20 @@ const App: React.FC = () => {
             dispatch({ type: 'SET_ERROR', payload: `진행률을 계산할 수 없습니다: ${countError}` });
             return;
         }
+        
+        const { topic, aiModel, mode } = activeSession;
 
         const sessionToSave: LearningSessionState = {
-            ...activeSession, isComplete: true, messages: [], bibleVerse: null,
-            currentStep: LearningStep.ANALYSIS, quizData: null, currentQuestionIndex: 0, score: 0
+            topic,
+            aiModel,
+            mode,
+            isComplete: true,
+            currentStep: mode === 'advanced' ? LearningStep.ANALYSIS : LearningStep.OBSERVATION,
+            messages: [],
+            bibleVerse: null,
+            quizData: null,
+            currentQuestionIndex: 0,
+            score: 0,
         };
 
         const newBookProgress: BookProgress = { 

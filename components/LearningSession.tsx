@@ -50,6 +50,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   // UI State
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [isStepModalOpen, setIsStepModalOpen] = useState(false);
+  const [isVerseVisibleOnMobile, setIsVerseVisibleOnMobile] = useState(false);
   const optionsMenuRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isInitialized = useRef(false);
@@ -316,14 +317,39 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
               confirmButtonText="학습 완료"
           />
       )}
+      <style>{`
+        @keyframes fade-in-down {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-down {
+          animation: fade-in-down 0.3s ease-out forwards;
+        }
+      `}</style>
       <div className="w-full h-[95vh] max-w-7xl mx-auto p-2 sm:p-6 flex flex-col sm:flex-row gap-6">
         <BibleVersePanel topic={topic} verse={bibleVerse} source={bibleVerseSource} fetchError={verseFetchError} />
         <div className="flex-1 flex flex-col bg-slate-800/50 rounded-2xl shadow-inner border border-slate-700 overflow-hidden">
           {/* Header */}
           <div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center flex-shrink-0 gap-4">
             <div className="flex-1 min-w-0">
-              <h2 className="text-xl font-bold text-slate-100 truncate" title={topic}>{topic}</h2>
-              <p className="text-xs text-blue-400 mt-1">AI 모델: {AI_MODEL_DISPLAY_NAMES[aiModel]} ({mode === 'general' ? '일반 학습' : '심화 학습'})</p>
+               <button 
+                onClick={() => setIsVerseVisibleOnMobile(prev => !prev)} 
+                className="w-full text-left sm:hidden"
+                aria-expanded={isVerseVisibleOnMobile}
+                aria-controls="mobile-verse-panel"
+              >
+                <h2 className="text-xl font-bold text-slate-100 truncate inline-flex items-center gap-2" title={topic}>
+                  {topic}
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-4 h-4 transition-transform ${isVerseVisibleOnMobile ? 'rotate-180' : ''}`}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </h2>
+              </button>
+              <h2 className="hidden sm:block text-xl font-bold text-slate-100 truncate" title={topic}>{topic}</h2>
+              <p className="text-xs text-blue-400 mt-1">
+                  AI 모델: {AI_MODEL_DISPLAY_NAMES[aiModel]} ({mode === 'general' ? '일반 학습' : '심화 학습'})
+                  <span className="font-semibold text-slate-300"> ・ {currentStep}</span>
+              </p>
             </div>
             
             <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
@@ -348,8 +374,26 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
             </div>
           </div>
           
-          {/* Progress Tracker */}
-          <div className="p-4 sm:px-6 sm:py-4 border-b border-slate-700"><ProgressTracker currentStep={currentStep} mode={mode}/></div>
+          {/* Desktop Progress Tracker */}
+          <div className="hidden sm:block p-4 border-b border-slate-700">
+            <ProgressTracker currentStep={currentStep} mode={mode} />
+          </div>
+
+          {isVerseVisibleOnMobile && (
+            <div id="mobile-verse-panel" className="sm:hidden p-4 bg-slate-900/50 border-b border-slate-700 max-h-48 overflow-y-auto animate-fade-in-down">
+                {verseFetchError && (
+                    <div className="mb-2 p-2 bg-yellow-900/50 border border-yellow-700 rounded-lg text-xs text-yellow-300">
+                        <p className="font-bold mb-1">DB 불러오기 실패 (AI 대체)</p>
+                        <p>{verseFetchError}</p>
+                    </div>
+                )}
+                {bibleVerse ? (
+                    <p className="text-slate-300 whitespace-pre-wrap leading-relaxed text-sm">{bibleVerse}</p>
+                ) : (
+                     !verseFetchError && <p className="text-slate-400 text-sm">성경 본문을 불러오는 중입니다...</p>
+                )}
+            </div>
+          )}
 
           {/* Chat Area */}
           <div ref={chatContainerRef} className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-6">

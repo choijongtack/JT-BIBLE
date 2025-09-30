@@ -7,7 +7,7 @@ const ProgressTracker: React.FC<{ currentStep: LearningStep, mode: 'general' | '
   const currentIndex = steps.indexOf(currentStep);
 
   return (
-    <div className="flex items-center justify-between mb-4 px-2">
+    <div className="flex items-center justify-between px-2">
       {steps.map((step, index) => (
         <React.Fragment key={step}>
           <div className="flex flex-col items-center">

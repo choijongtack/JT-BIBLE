@@ -131,28 +131,21 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status, loadingMessage, o
         }
     };
 
-    const [warningMessage, setWarningMessage] = useState<string | null>(null);
-
     const handleStart = (mode: 'general' | 'advanced') => {
         if (!selectedBook) return;
-
-        const lastSession = profile?.progress?.[selectedBook]?.lastSession;
-        const isInProgress = lastSession && lastSession.isComplete !== true;
-
-        const finalModeToUse = isInProgress ? (lastSession.mode || 'general') : mode;
-
-        if (isInProgress && mode !== finalModeToUse) {
-            setWarningMessage("학습이 완료될 때까지는 기존 선택한 모드로 진행됩니다.\n👉 기존 학습 모드를 선택하세요.");
-            return;
-        }
-
-        setWarningMessage(null);
-        onStart(selectedBook, selectedAI, finalModeToUse);
+        onStart(selectedBook, selectedAI, mode);
     };
     
+    const savedSessionForSelectedBook = profile?.progress?.[selectedBook || '']?.lastSession;
+    const isInProgress = savedSessionForSelectedBook && !savedSessionForSelectedBook.isComplete;
+    const inProgressMode = isInProgress ? savedSessionForSelectedBook.mode : null;
+
     const isStartDisabled = !selectedBook || 
         (selectedAI === 'perplexity' && perplexityKeyStatus !== 'saved') ||
         (selectedAI === 'chatgpt' && chatGptKeyStatus !== 'saved');
+
+    const isGeneralStartDisabled = isStartDisabled || (isInProgress && inProgressMode !== 'general');
+    const isAdvancedStartDisabled = isStartDisabled || (isInProgress && inProgressMode !== 'advanced');
 
     const getApiErrorMessage = (error: string | null, onSwitchToGemini: () => void, modelName: string) => {
         if (!error) return null;
@@ -441,19 +434,12 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status, loadingMessage, o
                         )}
                     </div>
 
-                    {/* 🚨 경고 메시지 영역 */}
-                    {warningMessage && (
-                        <div className="mb-4 p-3 bg-yellow-900/50 border border-yellow-600 text-yellow-300 rounded-lg whitespace-pre-line text-center animate-fade-in">
-                            {warningMessage}
-                        </div>
-                    )}
-
                     {/* 🚀 학습 시작 버튼 (일반/심화 모드) */}
                     <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-                        <div className="relative flex-1" ref={generalInfoRef}>
+                        <div className="relative flex-1 group" ref={generalInfoRef}>
                             <button
                                 onClick={() => handleStart('general')}
-                                disabled={isStartDisabled}
+                                disabled={isGeneralStartDisabled}
                                 className="w-full flex items-center justify-center px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-500 transition-all disabled:bg-slate-600 disabled:cursor-not-allowed"
                             >
                                 <span>{selectedBook ? `${selectedBook} 일반 학습` : '일반 학습'}</span>
@@ -465,6 +451,11 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status, loadingMessage, o
                                     <IconQuestionMark className="w-5 h-5" />
                                 </span>
                             </button>
+                            {isGeneralStartDisabled && selectedBook && (
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max p-2 bg-slate-900 text-xs text-slate-300 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                    {isInProgress ? '진행 중인 심화 학습을 완료해야 선택 가능합니다.' : '먼저 성경과 AI 모델을 선택해주세요.'}
+                                </div>
+                            )}
                             {showGeneralInfo && (
                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 rounded-lg shadow-2xl border border-slate-700 z-20 animate-fade-in text-left">
                                     <h3 className="text-lg font-bold text-blue-400 mb-2">일반 학습</h3>
@@ -477,10 +468,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status, loadingMessage, o
                                 </div>
                             )}
                         </div>
-                        <div className="relative flex-1" ref={advancedInfoRef}>
+                        <div className="relative flex-1 group" ref={advancedInfoRef}>
                             <button
                                 onClick={() => handleStart('advanced')}
-                                disabled={isStartDisabled}
+                                disabled={isAdvancedStartDisabled}
                                 className="w-full flex items-center justify-center px-8 py-3 bg-purple-600 text-white font-bold rounded-lg shadow-lg hover:bg-purple-500 transition-all disabled:bg-slate-600 disabled:cursor-not-allowed"
                             >
                                 <span>{selectedBook ? `${selectedBook} 심화 학습` : '심화 학습'}</span>
@@ -492,6 +483,11 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status, loadingMessage, o
                                     <IconQuestionMark className="w-5 h-5" />
                                 </span>
                             </button>
+                             {isAdvancedStartDisabled && selectedBook && (
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max p-2 bg-slate-900 text-xs text-slate-300 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                     {isInProgress ? '진행 중인 일반 학습을 완료해야 선택 가능합니다.' : '먼저 성경과 AI 모델을 선택해주세요.'}
+                                </div>
+                            )}
                             {showAdvancedInfo && (
                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 rounded-lg shadow-2xl border border-slate-700 z-20 animate-fade-in text-left">
                                     <h3 className="text-lg font-bold text-purple-400 mb-2">심화 학습</h3>
