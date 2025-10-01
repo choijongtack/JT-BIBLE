@@ -43,6 +43,7 @@ function App() {
   const [lastResult, setLastResult] = useState<{ topic: string; exitType: 'save' } | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [progressDebugInfo, setProgressDebugInfo] = useState<ProgressDebugInfo | null>(null);
+  const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   // FIX: Introduced an 'operation' state to manage async actions declaratively,
   // replacing the previous `setTimeout`-based approach. This ensures that state transitions
   // and side effects are handled more predictably within React's lifecycle.
@@ -63,6 +64,22 @@ function App() {
       setAppStatus('idle');
     }
   }, [authStatus, appStatus]);
+
+  useEffect(() => {
+    const storedImage = localStorage.getItem('appBackgroundImage');
+    if (storedImage) {
+        setBackgroundImage(storedImage);
+    }
+  }, []);
+
+  const handleSetBackgroundImage = (dataUrl: string | null) => {
+    setBackgroundImage(dataUrl);
+    if (dataUrl) {
+        localStorage.setItem('appBackgroundImage', dataUrl);
+    } else {
+        localStorage.removeItem('appBackgroundImage');
+    }
+  };
 
   const getTopicForBook = (book: string, aiModel: AiModel) => {
     switch (aiModel) {
@@ -264,6 +281,7 @@ function App() {
             onDelete={handleDeleteRequest}
             onGptKeySaved={handleGptKeySaved}
             onPerplexityKeySaved={handlePerplexityKeySaved}
+            onSetBackgroundImage={handleSetBackgroundImage}
           />
         );
       case 'loading':
@@ -306,13 +324,27 @@ function App() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-4 selection:bg-blue-500/30">
-      {renderContent()}
-      <DeleteConfirmationModal
-        isOpen={isDeleteModalOpen}
-        onConfirm={handleConfirmDelete}
-        onCancel={() => setIsDeleteModalOpen(false)}
-      />
+    <main 
+      className="relative min-h-screen bg-slate-900 text-slate-100 selection:bg-blue-500/30"
+      style={backgroundImage ? { 
+          backgroundImage: `url(${backgroundImage})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed'
+      } : {}}
+    >
+      {/* Overlay to ensure text readability */}
+      {backgroundImage && <div className="absolute inset-0 bg-black/60 z-0"></div>}
+
+      {/* Wrapper for all content to sit above the overlay */}
+      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-4">
+        {renderContent()}
+        <DeleteConfirmationModal
+          isOpen={isDeleteModalOpen}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setIsDeleteModalOpen(false)}
+        />
+      </div>
     </main>
   );
 }

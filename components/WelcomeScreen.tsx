@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { AiModel, Profile } from '../types';
-import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX } from '../constants';
+import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX, IconImage, IconSettings } from '../constants';
 import { savePerplexityApiKey } from '../services/perplexityService';
 import { saveChatGptApiKey } from '../services/chatgptService';
 import { calculateVerseProgressForList } from '../services/bibleData';
@@ -14,6 +14,7 @@ interface WelcomeScreenProps {
     onDelete: () => void;
     onGptKeySaved: () => void;
     onPerplexityKeySaved: () => void;
+    onSetBackgroundImage: (dataUrl: string | null) => void;
 }
 
 const IconQuestionMark: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -50,7 +51,7 @@ const StatProgressBar: React.FC<{
     );
 };
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved, onSetBackgroundImage }) => {
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
     
@@ -69,6 +70,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
     const [showAdvancedInfo, setShowAdvancedInfo] = useState(false);
     const generalInfoRef = useRef<HTMLDivElement>(null);
     const advancedInfoRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    
+    const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+    const settingsContainerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (profile?.chatgpt_api_key) {
@@ -93,12 +98,46 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
             if (advancedInfoRef.current && !advancedInfoRef.current.contains(event.target as Node)) {
                 setShowAdvancedInfo(false);
             }
+            if (settingsContainerRef.current && !settingsContainerRef.current.contains(event.target as Node)) {
+                setIsSettingsMenuOpen(false);
+            }
         };
         document.addEventListener("mousedown", handleClickOutside);
         return () => {
             document.removeEventListener("mousedown", handleClickOutside);
         };
     }, []);
+    
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            if (file.size > 5 * 1024 * 1024) { // 5MB limit
+                alert("이미지 파일은 5MB를 초과할 수 없습니다.");
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const dataUrl = e.target?.result as string;
+                onSetBackgroundImage(dataUrl);
+            };
+            reader.onerror = () => {
+                alert("이미지를 읽는 중 오류가 발생했습니다.");
+            };
+            reader.readAsDataURL(file);
+        }
+        // Reset file input value to allow selecting the same file again
+        if(event.target) event.target.value = '';
+    };
+
+    const triggerFileSelect = () => {
+        fileInputRef.current?.click();
+        setIsSettingsMenuOpen(false);
+    };
+
+    const handleRemoveImage = () => {
+        onSetBackgroundImage(null);
+        setIsSettingsMenuOpen(false);
+    };
 
     const handleSavePerplexityKey = async () => {
         setPerplexityKeyStatus('saving');
@@ -225,13 +264,60 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, profile, onLogou
 
     return (
         <div className="relative w-full max-w-4xl mx-auto bg-slate-800/50 p-4 sm:p-8 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-sm">
+            <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                className="hidden" 
+                accept="image/png, image/jpeg, image/gif" 
+            />
             <header className="flex flex-col items-center sm:flex-row sm:justify-between mb-8">
                 <div className="hidden sm:block sm:flex-1" />
                 <div className="text-center">
                     <h1 className="text-3xl sm:text-4xl font-bold text-slate-100">성경 공부 도우미</h1>
                     <p className="text-lg text-slate-300 mt-1">4단계 학습 방법</p>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0 mt-4 sm:mt-0 sm:flex-1 sm:justify-end">
+                <div className="flex items-center gap-4 flex-shrink-0 mt-4 sm:mt-0 sm:flex-1 sm:justify-end">
+                    {/* Settings Button */}
+                    <div ref={settingsContainerRef} className="relative">
+                        <button
+                            onClick={() => setIsSettingsMenuOpen(prev => !prev)}
+                            className="p-2 text-slate-400 hover:text-slate-100 bg-slate-700/50 hover:bg-slate-700 rounded-full transition-colors"
+                            aria-label="화면 설정"
+                            aria-haspopup="true"
+                            aria-expanded={isSettingsMenuOpen}
+                        >
+                            <IconSettings className={`w-6 h-6 transition-transform duration-300 ${isSettingsMenuOpen ? 'rotate-90' : 'rotate-0'}`} />
+                        </button>
+                        {isSettingsMenuOpen && (
+                             <div className="absolute top-full right-0 mt-2 w-56 bg-slate-800/95 backdrop-blur-md border border-slate-600 rounded-lg shadow-xl animate-fade-in z-20">
+                                <ul className="py-2" role="menu">
+                                    <li role="none">
+                                        <button 
+                                            onClick={triggerFileSelect} 
+                                            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-200 hover:bg-slate-700/70 transition-colors"
+                                            role="menuitem"
+                                        >
+                                            <IconImage className="w-5 h-5 text-slate-400" />
+                                            <span>배경화면 변경</span>
+                                        </button>
+                                    </li>
+                                    <li role="none">
+                                        <button 
+                                            onClick={handleRemoveImage} 
+                                            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-200 hover:bg-slate-700/70 transition-colors"
+                                            role="menuitem"
+                                        >
+                                            <IconX className="w-5 h-5 text-slate-400" />
+                                            <span>배경화면 제거</span>
+                                        </button>
+                                    </li>
+                                </ul>
+                             </div>
+                        )}
+                    </div>
+
+                    {/* Account controls */}
                     <button
                         onClick={onDelete}
                         className="px-4 py-2 text-red-400 font-semibold rounded-lg hover:bg-red-900/50 hover:text-red-300 transition-colors text-sm"
