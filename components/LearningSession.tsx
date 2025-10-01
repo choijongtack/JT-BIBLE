@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useDebounce } from 'use-debounce';
 import type { Quiz, ChatMessage, LearningSessionState } from '../types';
 import { LearningStep } from '../constants';
 import { QuestionType } from '../types';
@@ -117,17 +118,32 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       }
     }
   }, [isLoading, isFetchingVerse, bibleVerse, verseFetchError, sendMessage, savedSession.messages, setMessages]);
+
+  // --- Debounced State Saving ---
+  // Group all state to be saved into a single object for debouncing.
+  const sessionStateToSave: LearningSessionState = {
+    topic, aiModel, mode,
+    messages: chatHistory,
+    currentStep,
+    bibleVerse,
+    quizData,
+    currentQuestionIndex,
+    score,
+    isComplete: isCompleted,
+  };
+
+  // Debounce the state object to prevent rapid-fire saves while the user is interacting.
+  const [debouncedSessionState] = useDebounce(sessionStateToSave, 1000); // 1-second delay
   
-  // Effect for saving state
+  // Effect for saving state (debounced)
   useEffect(() => {
+    // Do not save state on the initial render for a brand new session.
+    // For resumed sessions, chatHistory will already have items.
     if (!isInitialized.current && chatHistory.length === 0) return;
-    const newState: LearningSessionState = {
-      topic, aiModel, mode,
-      messages: chatHistory, currentStep, bibleVerse,
-      quizData, currentQuestionIndex, score, isComplete: isCompleted,
-    };
-    onStateChange(newState);
-  }, [chatHistory, currentStep, bibleVerse, quizData, currentQuestionIndex, score, isCompleted, onStateChange, topic, aiModel, mode]);
+    
+    onStateChange(debouncedSessionState);
+  }, [debouncedSessionState, onStateChange]);
+
 
   // Other Effects (scrolling, back button, etc.)
   useEffect(() => {

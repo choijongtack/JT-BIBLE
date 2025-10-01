@@ -27,7 +27,9 @@ import type { ProgressDebugInfo } from './services/userDataService';
 import { LearningStep } from './constants';
 
 const LoadingScreen = ({ message }: { message: string }) => (
-  <div className="flex flex-col items-center justify-center h-full text-white text-center">
+  // FIX: Added a key to the root div to ensure React re-renders the component
+  // when the message changes, which helps in displaying updated loading text correctly.
+  <div key={message} className="flex flex-col items-center justify-center h-full text-white text-center">
     <IconLoader className="w-12 h-12 animate-spin text-blue-400" />
     <p className="mt-4 text-lg">{message}</p>
   </div>
@@ -41,6 +43,13 @@ function App() {
   const [lastResult, setLastResult] = useState<{ topic: string; exitType: 'save' } | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [progressDebugInfo, setProgressDebugInfo] = useState<ProgressDebugInfo | null>(null);
+  // FIX: Introduced an 'operation' state to manage async actions declaratively,
+  // replacing the previous `setTimeout`-based approach. This ensures that state transitions
+  // and side effects are handled more predictably within React's lifecycle.
+  const [operation, setOperation] = useState<{
+    type: 'start-new' | 'resume';
+    payload: any;
+  } | null>(null);
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') {
@@ -64,35 +73,56 @@ function App() {
     }
   };
 
+  // FIX: This new `useEffect` hook listens for changes to the `operation` state.
+  // When an operation is set, it triggers the corresponding async logic (like fetching a topic).
+  // This decouples the action dispatch from the execution, making the flow more robust
+  // and aligned with React's declarative nature.
+  useEffect(() => {
+    if (!operation) return;
+
+    const executeOperation = async () => {
+      if (operation.type === 'start-new') {
+        const { book, aiModel, mode } = operation.payload;
+        try {
+          const topic = await getTopicForBook(book, aiModel);
+          const newSession: LearningSessionState = {
+            topic,
+            currentStep: mode === 'general' ? LearningStep.OBSERVATION : LearningStep.ANALYSIS,
+            messages: [],
+            aiModel,
+            mode,
+            bibleVerse: null,
+            score: 0,
+            quizData: null,
+            currentQuestionIndex: 0,
+            isComplete: false,
+          };
+          setLearningSession(newSession);
+          setAppStatus('learning');
+        } catch (err) {
+          alert(`학습 주제를 가져오는 데 실패했습니다: ${err instanceof Error ? err.message : String(err)}`);
+          setAppStatus('idle');
+        }
+      } else if (operation.type === 'resume') {
+        const { session } = operation.payload;
+        setLearningSession(session);
+        setAppStatus('learning');
+      }
+      // Reset the operation after it's been handled.
+      setOperation(null);
+    };
+
+    executeOperation();
+  }, [operation]);
+
   const startNewLearningSession = useCallback((book: string, aiModel: AiModel, mode: 'general' | 'advanced') => {
     setAppStatus('loading');
     setLoadingMessage(`'${book}'에 대한 학습 주제를 생성 중입니다...`);
     setProgressDebugInfo(null);
-    
-    // Use setTimeout to ensure the loading screen renders before the async operation starts
-    setTimeout(async () => {
-        try {
-            const topic = await getTopicForBook(book, aiModel);
-            const newSession: LearningSessionState = {
-                topic,
-                currentStep: mode === 'general' ? LearningStep.OBSERVATION : LearningStep.ANALYSIS,
-                messages: [],
-                aiModel,
-                mode,
-                bibleVerse: null,
-                score: 0,
-                quizData: null,
-                currentQuestionIndex: 0,
-                isComplete: false,
-            };
-            setLearningSession(newSession);
-            // This final state change is also wrapped to ensure rendering consistency
-            setTimeout(() => setAppStatus('learning'), 50);
-        } catch (err) {
-            alert(`학습 주제를 가져오는 데 실패했습니다: ${err instanceof Error ? err.message : String(err)}`);
-            setAppStatus('idle');
-        }
-    }, 50);
+    // FIX: Instead of using `setTimeout` to trigger the async logic, we now set
+    // the `operation` state. The `useEffect` hook will pick this up and execute
+    // the logic after the current render cycle, ensuring the loading screen is displayed.
+    setOperation({ type: 'start-new', payload: { book, aiModel, mode } });
   }, []);
 
   const handleStart = useCallback((book: string, aiModel: AiModel, mode: 'general' | 'advanced' = 'general') => {
@@ -105,10 +135,11 @@ function App() {
       if (resume) {
         setAppStatus('loading');
         setLoadingMessage(`'${lastSession.topic}' 학습을 이어갑니다...`);
-        setTimeout(() => {
-            setLearningSession(lastSession);
-            setAppStatus('learning');
-        }, 50);
+        // FIX: Replaced `setTimeout` with the `operation` state pattern for resuming a session.
+        // This maintains consistency with how new sessions are started.
+        setOperation({
+          type: 'resume', payload: { session: lastSession }
+        });
       } else {
         startNewLearningSession(book, aiModel, mode);
       }
