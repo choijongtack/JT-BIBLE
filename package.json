@@ -13,8 +13,7 @@
     "react-dom": "^18.2.0",
     "@google/genai": "^1.16.0",
     "@supabase/supabase-js": "^2.45.0",
-    "react-beforeunload": "^2.6.0",
-    "use-debounce": "^10.0.1"
+    "react-beforeunload": "^2.6.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
