@@ -10,6 +10,8 @@ type ApiKeyStatus = 'unsaved' | 'saving' | 'saved' | 'error' | 'editing';
 interface WelcomeScreenProps {
     status: AppStatus;
     loadingMessage: string;
+    // 💡 [추가]: 새로운 Prop 정의
+    isActionLoading: boolean; 
     onStart: (book: string, aiModel: AiModel, mode?: 'general' | 'advanced') => void;
     profile: Profile | null;
     onLogout: () => void;
@@ -52,8 +54,8 @@ const StatProgressBar: React.FC<{
     );
 };
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status, loadingMessage, onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved }) => {
-    const isLoading = status === 'loading';
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status,isActionLoading, loadingMessage, onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved }) => {
+    const isLoading = status === 'loading'|| isActionLoading;
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
     

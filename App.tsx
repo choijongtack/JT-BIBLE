@@ -100,7 +100,7 @@ type AppAction =
     | { type: 'SET_AUTH_STATUS'; payload: AppStatus }
     | { type: 'SET_AUTH_ERROR'; payload: string | null }
     | { type: 'LOGIN_SUCCESS' }
-    | { type: 'START_LOADING'; payload: string }
+    | { type: 'START_FEATURE_LOADING'; payload: string }
     | { type: 'SET_ERROR'; payload: string | null }
     | { type: 'START_LEARNING'; payload: LearningSessionState }
     | { type: 'UPDATE_LEARNING_STATE'; payload: LearningSessionState }
@@ -114,10 +114,11 @@ type AppAction =
 
 const initialState: AppState = {
     status: 'loading',
+    isActionLoading: false, // 👈 초기값 설정
     activeSession: null,
     lastSessionResult: null,
     error: null,
-    loadingMessage: '앱을 초기화하고 Supabase에 연결하는 중...',
+    loadingMessage: '사용자의 세션/프로필 데이터를 로드하는 중...',
     isDeleteConfirmOpen: false,
     completedBookModal: { isOpen: false, bookName: null },
     progressDebugInfo: null,
@@ -135,12 +136,40 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
                 activeSession: null,
                 status: 'idle',
             };
-        case 'START_LOADING':
-            return { ...state, status: 'loading', loadingMessage: action.payload, error: null };
+        // 2. 학습 시작 로직 (새로운 액션): status 대신 isActionLoading 사용
+        case 'START_FEATURE_LOADING': 
+            return {
+                ...state,
+                isActionLoading: true, // 👈 플래그만 true로 변경
+                loadingMessage: action.payload,
+            };
+
+        // 3. 학습 종료 또는 세션 시작 실패 시 로직
+//        case 'STOP_FEATURE_LOADING': // 학습 시작 실패 또는 취소 시 사용
+//        case 'GO_TO_IDLE': // 기존 메인 화면 복귀 로직
+//            return {
+//                ...state,
+//                status: 'idle',
+//                isActionLoading: false, // 👈 플래그 해제
+//                loadingMessage: '',
+//            };
+            
+        case 'START_LEARNING': // 실제 학습 세션 시작
+            return {
+                ...state,
+                status: 'learning',
+                isActionLoading: false, // 👈 학습 화면 진입 시 플래그 해제
+                activeSession: action.payload,
+                loadingMessage: '',
+            };    
+//        case 'START_LOADING':
+//            return { ...state, status: 'loading', loadingMessage: action.payload, error: null };
         case 'SET_ERROR':
-            return { ...state, status: 'error', error: action.payload, progressDebugInfo: null };
-        case 'START_LEARNING':
-            return { ...state, status: 'learning', activeSession: action.payload };
+            return { ...state, status: 'error', error: action.payload, progressDebugInfo: null, 
+                isActionLoading: false, // 💡 [필수 확인]: 오류 발생 시 로딩 플래그 해제 
+            };
+//        case 'START_LEARNING':
+//            return { ...state, status: 'learning', activeSession: action.payload };
         case 'UPDATE_LEARNING_STATE':
             return { ...state, activeSession: action.payload };
         case 'FINISH_LEARNING':
@@ -149,6 +178,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
                 status: 'idle',
                 activeSession: null,
                 lastSessionResult: null,
+                isActionLoading: false, // 💡 [핵심 추가]: 학습 완료 시 로딩 플래그 해제
                 progressDebugInfo: action.payload.debugInfo,
             };
         case 'SAVE_AND_EXIT':
@@ -208,7 +238,7 @@ const App: React.FC = () => {
 
 
     const resumeLearningSession = useCallback((sessionToResume: LearningSessionState, mode?: 'general' | 'advanced') => {
-        dispatch({ type: 'START_LOADING', payload: `'${sessionToResume.topic}' 학습을 다시 시작합니다...` });
+        dispatch({ type: 'START_FEATURE_LOADING', payload: `'${sessionToResume.topic}' 학습을 다시 시작합니다...` });
         const finalMode = mode ?? sessionToResume.mode ?? 'general';
         const sessionToStart = { ...sessionToResume, mode: finalMode };
         dispatch({ type: 'START_LEARNING', payload: sessionToStart });
@@ -239,7 +269,7 @@ const App: React.FC = () => {
                 }
             }
             
-            dispatch({ type: 'START_LOADING', payload: `'${topicToGet}'${isNextTopic ? ' 다음' : '의 첫'} 주제를 찾는 중...` });
+            dispatch({ type: 'START_FEATURE_LOADING', payload: `'${topicToGet}'${isNextTopic ? ' 다음' : '의 첫'} 주제를 찾는 중...` });
 
             if (finalAiModel === 'perplexity') {
                 nextTopic = isNextTopic ? await getNextPerplexityStudyTopic(topicToGet, book) : await getPerplexityStudyTopic(topicToGet);
@@ -252,12 +282,12 @@ const App: React.FC = () => {
                 nextTopic = isNextTopic ? await getNextGeminiStudyTopic(topicToGet, book) : await getGeminiStudyTopic(topicToGet);
             }
 
-            dispatch({ type: 'START_LOADING', payload: `'${nextTopic}' 본문을 불러오는 중...` });
+            dispatch({ type: 'START_FEATURE_LOADING', payload: `'${nextTopic}' 본문을 불러오는 중...` });
             const verseResult = await getBibleVerse(nextTopic);
 
             if (verseResult.error) {
                 console.warn(`AI가 제안한 토픽('${nextTopic}') 조회 실패. Fallback 로직 실행. 오류:`, verseResult.error);
-                dispatch({ type: 'START_LOADING', payload: `AI 추천(${nextTopic})이 유효하지 않아 다음 주제를 직접 계산합니다...` });
+                dispatch({ type: 'START_FEATURE_LOADING', payload: `AI 추천(${nextTopic})이 유효하지 않아 다음 주제를 직접 계산합니다...` });
 
                 let correctedTopic: string | null = null;
                 const lastTopicRef = parseReference(topicToGet);
@@ -293,7 +323,7 @@ const App: React.FC = () => {
                 }
 
                 nextTopic = correctedTopic;
-                dispatch({ type: 'START_LOADING', payload: `대체 주제 '${nextTopic}' 본문을 불러오는 중...` });
+                dispatch({ type: 'START_FEATURE_LOADING', payload: `대체 주제 '${nextTopic}' 본문을 불러오는 중...` });
                 const retryResult = await getBibleVerse(nextTopic);
                 if (retryResult.error) {
                     throw new Error(`대체 주제('${nextTopic}') 조회에 실패했습니다: ${retryResult.error}`);
@@ -321,7 +351,7 @@ const App: React.FC = () => {
     }, [profile]);
 
     const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, mode?: 'general' | 'advanced') => {
-        dispatch({ type: 'START_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
+        dispatch({ type: 'START_FEATURE_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
     
         const savedBookProgress = profile?.progress?.[book];
         let savedSession = savedBookProgress?.lastSession;
@@ -359,7 +389,7 @@ const App: React.FC = () => {
             return;
         }
     
-        dispatch({ type: 'START_LOADING', payload: `학습 결과를 저장하는 중...` });
+        dispatch({ type: 'START_FEATURE_LOADING', payload: `학습 결과를 저장하는 중...` });
 
         const book = getBookFromTopic(activeSession.topic);
 
@@ -412,6 +442,8 @@ const App: React.FC = () => {
         const result = await updateUserProgress(book, newBookProgress);
 
         if (result.error || !result.after) {
+            // 💡 [수정]: 오류 발생 시 로딩 상태를 명시적으로 해제합니다.
+            dispatch({ type: 'STOP_FEATURE_LOADING' }); 
             dispatch({ type: 'SET_ERROR', payload: result.error || '진행 상황을 업데이트하는 데 실패했습니다.' });
             return;
         }
@@ -453,11 +485,11 @@ const App: React.FC = () => {
 
     const handleExitLearning = useCallback(async () => {
         dispatch({ type: 'GO_TO_IDLE' });
-    }, [profile?.id]);
+    }, [dispatch]);
     
     const handleStateChange = useCallback(async (newState: LearningSessionState) => {
         dispatch({ type: 'UPDATE_LEARNING_STATE', payload: newState });
-    }, [profile?.id]);
+    }, [dispatch]);
 
     const handleGptKeySaved = useCallback(() => {
         setProfile(prev => {
@@ -475,7 +507,7 @@ const App: React.FC = () => {
 
     const executeDelete = useCallback(async () => {
         dispatch({ type: 'CLOSE_DELETE_MODAL' });
-        dispatch({ type: 'START_LOADING', payload: '계정을 삭제하는 중입니다...' });
+        dispatch({ type: 'START_FEATURE_LOADING', payload: '계정을 삭제하는 중입니다...' });
         try {
             await deleteAccount();
         } catch (e) {
@@ -507,6 +539,8 @@ const App: React.FC = () => {
                     <WelcomeScreen
                         status={status}
                         loadingMessage={loadingMessage}
+                        // 💡 [핵심 추가]: state에서 isActionLoading을 Prop으로 전달합니다.
+                        isActionLoading={state.isActionLoading} 
                         onStart={handleStartLearning}
                         profile={profile}
                         onLogout={logout}
