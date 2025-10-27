@@ -76,6 +76,8 @@ const BookCompletedModal: React.FC<BookCompletedModalProps> = ({ isOpen, onClose
 
 interface AppState {
     status: AppStatus;
+    // FIX: Added the `isActionLoading` property to correctly type the application's state.
+    isActionLoading: boolean;
     activeSession: LearningSessionState | null;
     lastSessionResult: {
         topic: string;
@@ -190,7 +192,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
                 progressDebugInfo: action.payload.debugInfo,
             };
         case 'GO_TO_IDLE':
-            return { ...state, status: 'idle', activeSession: null, error: null, progressDebugInfo: null, lastSessionResult: null };
+            return { ...state, status: 'idle', activeSession: null, error: null, progressDebugInfo: null, lastSessionResult: null, isActionLoading: false, loadingMessage: '' };
         case 'OPEN_DELETE_MODAL':
             return { ...state, isDeleteConfirmOpen: true };
         case 'CLOSE_DELETE_MODAL':
@@ -264,6 +266,7 @@ const App: React.FC = () => {
                     const lastVerse = lastTopicRef.verses[lastTopicRef.verses.length - 1];
                     if (lastTopicRef.chapter === bookMeta.chapters && lastVerse >= bookMeta.versesInLastChapter) {
                         dispatch({ type: 'OPEN_COMPLETED_MODAL', payload: book });
+                        dispatch({ type: 'GO_TO_IDLE' });
                         return;
                     }
                 }
@@ -314,6 +317,7 @@ const App: React.FC = () => {
                         correctedTopic = `${book} ${nextChapter}:1-${maxStep}`;
                     } else {
                         dispatch({ type: 'OPEN_COMPLETED_MODAL', payload: book });
+                        dispatch({ type: 'GO_TO_IDLE' });
                         return;
                     }
                 }
@@ -443,7 +447,8 @@ const App: React.FC = () => {
 
         if (result.error || !result.after) {
             // 💡 [수정]: 오류 발생 시 로딩 상태를 명시적으로 해제합니다.
-            dispatch({ type: 'STOP_FEATURE_LOADING' }); 
+            // FIX: Removed redundant `STOP_FEATURE_LOADING` dispatch.
+            // The `SET_ERROR` action already handles resetting the loading state.
             dispatch({ type: 'SET_ERROR', payload: result.error || '진행 상황을 업데이트하는 데 실패했습니다.' });
             return;
         }
