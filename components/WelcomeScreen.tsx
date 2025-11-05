@@ -3,7 +3,7 @@ import type { AiModel, Profile, AppStatus } from '../types';
 import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS, IconCheck, IconX, IconLoader } from '../constants';
 import { savePerplexityApiKey } from '../services/perplexityService';
 import { saveChatGptApiKey } from '../services/chatgptService';
-import { calculateVerseProgressForList } from '../services/bibleData';
+import { calculateVerseProgressForList, BIBLE_METADATA } from '../services/bibleData';
 
 type ApiKeyStatus = 'unsaved' | 'saving' | 'saved' | 'error' | 'editing';
 
@@ -54,7 +54,7 @@ const StatProgressBar: React.FC<{
     );
 };
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status,isActionLoading, loadingMessage, onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status, isActionLoading, loadingMessage, onStart, profile, onLogout, onDelete, onGptKeySaved, onPerplexityKeySaved }) => {
     const isLoading = status === 'loading'|| isActionLoading;
     const [selectedBook, setSelectedBook] = useState<string | null>(null);
     const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
@@ -195,6 +195,12 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status,isActionLoading, l
     const BookButton: React.FC<{ book: string }> = ({ book }) => {
         const isSelected = selectedBook === book;
         const bookProgress = profile?.progress?.[book];
+        const bookMeta = BIBLE_METADATA[book];
+
+        const isFullyCompleted = bookProgress?.completionMarker && bookMeta &&
+            bookProgress.completionMarker.chapter === bookMeta.chapters &&
+            bookProgress.completionMarker.verse >= bookMeta.versesInLastChapter;
+
         const isInProgress = bookProgress?.lastSession && !bookProgress.lastSession.isComplete;
         const hasCompletedTopics = bookProgress && bookProgress.completionMarker;
 
@@ -204,6 +210,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status,isActionLoading, l
                 className={`relative w-full text-center px-2 py-2 rounded-md transition-colors text-sm group ${
                     isSelected
                         ? 'bg-blue-600 text-white font-bold'
+                        : isFullyCompleted
+                        ? 'bg-green-800 hover:bg-green-700 text-green-200 ring-1 ring-green-500/50'
                         : isInProgress
                         ? 'bg-slate-700 hover:bg-slate-600 text-slate-200 ring-1 ring-yellow-500/50'
                         : hasCompletedTopics 
@@ -215,7 +223,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status,isActionLoading, l
                     <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-yellow-400 rounded-full animate-pulse" title="In Progress" />
                 )}
                 {!isInProgress && hasCompletedTopics && (
-                    <IconCheck className="absolute top-1 right-1 w-3.5 h-3.5 text-blue-400" title="Has completed topics" />
+                     <IconCheck 
+                        className={`absolute top-1 right-1 w-3.5 h-3.5 ${isFullyCompleted ? 'text-green-300' : 'text-blue-400'}`} 
+                        title={isFullyCompleted ? "학습 완료" : "완료한 학습 있음"} 
+                    />
                 )}
                 <span className="relative z-10">{book}</span>
             </button>
@@ -446,75 +457,56 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ status,isActionLoading, l
                             >
                                 <span>{selectedBook ? `${selectedBook} 일반 학습` : '일반 학습'}</span>
                                 <span 
-                                    onClick={(e) => { e.stopPropagation(); setShowGeneralInfo(s => !s); setShowAdvancedInfo(false); }}
-                                    className="ml-2 p-1 rounded-full hover:bg-blue-500"
-                                    aria-label="일반 학습 설명"
+                                    onClick={(e) => { e.stopPropagation(); setShowGeneralInfo(s => !s); }}
+                                    onMouseEnter={() => setShowGeneralInfo(true)}
+                                    onMouseLeave={() => setShowGeneralInfo(false)}
                                 >
-                                    <IconQuestionMark className="w-5 h-5" />
+                                    <IconQuestionMark className="w-5 h-5 text-blue-200 ml-2" />
                                 </span>
                             </button>
-                            {isGeneralStartDisabled && selectedBook && (
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max p-2 bg-slate-900 text-xs text-slate-300 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                                    {isInProgress ? '진행 중인 심화 학습을 완료해야 선택 가능합니다.' : '먼저 성경과 AI 모델을 선택해주세요.'}
+                            {isInProgress && inProgressMode === 'general' && (
+                                <div className="absolute -top-2 -right-2 px-2 py-0.5 bg-yellow-400 text-yellow-900 text-xs font-bold rounded-full animate-pulse">
+                                    진행중
                                 </div>
                             )}
                             {showGeneralInfo && (
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 rounded-lg shadow-2xl border border-slate-700 z-20 animate-fade-in text-left">
-                                    <h3 className="text-lg font-bold text-blue-400 mb-2">일반 학습</h3>
-                                    <p className="text-sm text-slate-300 leading-relaxed">
-                                        성경 본문을 관찰, 해석, 적용하고 암기하는 4단계 학습법으로, 성경을 처음 접하거나 가볍게 공부하고 싶은 분들에게 적합합니다.
-                                    </p>
-                                    <button onClick={() => setShowGeneralInfo(false)} className="absolute top-2 right-2 p-1 text-slate-500 hover:text-white">
-                                        <IconX className="w-5 h-5" />
-                                    </button>
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 bg-slate-900 text-slate-300 text-sm p-3 rounded-lg shadow-xl z-20 text-left border border-slate-700">
+                                    <h5 className="font-bold text-slate-100 mb-1">일반 학습 모드</h5>
+                                    <p>관찰, 해석, 적용, 암송/시험의 4단계로 성경을 학습합니다. 개인 경건 생활에 초점을 맞춥니다.</p>
                                 </div>
                             )}
                         </div>
+
                         <div className="relative flex-1 group" ref={advancedInfoRef}>
                             <button
                                 onClick={() => handleStart('advanced')}
                                 disabled={isAdvancedStartDisabled}
-                                className="w-full flex items-center justify-center px-8 py-3 bg-purple-600 text-white font-bold rounded-lg shadow-lg hover:bg-purple-500 transition-all disabled:bg-slate-600 disabled:cursor-not-allowed"
+                                className="w-full flex items-center justify-center px-8 py-3 bg-slate-600 text-white font-bold rounded-lg shadow-lg hover:bg-slate-500 transition-all disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed"
                             >
                                 <span>{selectedBook ? `${selectedBook} 심화 학습` : '심화 학습'}</span>
                                 <span 
-                                    onClick={(e) => { e.stopPropagation(); setShowAdvancedInfo(s => !s); setShowGeneralInfo(false); }}
-                                    className="ml-2 p-1 rounded-full hover:bg-purple-500"
-                                    aria-label="심화 학습 설명"
+                                    onClick={(e) => { e.stopPropagation(); setShowAdvancedInfo(s => !s); }}
+                                    onMouseEnter={() => setShowAdvancedInfo(true)}
+                                    onMouseLeave={() => setShowAdvancedInfo(false)}
                                 >
-                                    <IconQuestionMark className="w-5 h-5" />
+                                    <IconQuestionMark className="w-5 h-5 text-slate-400 ml-2" />
                                 </span>
                             </button>
-                             {isAdvancedStartDisabled && selectedBook && (
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max p-2 bg-slate-900 text-xs text-slate-300 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                                     {isInProgress ? '진행 중인 일반 학습을 완료해야 선택 가능합니다.' : '먼저 성경과 AI 모델을 선택해주세요.'}
+                            {isInProgress && inProgressMode === 'advanced' && (
+                                <div className="absolute -top-2 -right-2 px-2 py-0.5 bg-yellow-400 text-yellow-900 text-xs font-bold rounded-full animate-pulse">
+                                    진행중
                                 </div>
                             )}
                             {showAdvancedInfo && (
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 rounded-lg shadow-2xl border border-slate-700 z-20 animate-fade-in text-left">
-                                    <h3 className="text-lg font-bold text-purple-400 mb-2">심화 학습</h3>
-                                    <p className="text-sm text-slate-300 leading-relaxed">
-                                        성경 본문을 법률 조문처럼 분석, 이해하고 암기한 후, 논술형 시험으로 마무리하는 심화 학습법입니다. 더 깊이 있는 연구나 시험을 준비하는 분들에게 적합합니다.
-                                    </p>
-                                    <button onClick={() => setShowAdvancedInfo(false)} className="absolute top-2 right-2 p-1 text-slate-500 hover:text-white">
-                                        <IconX className="w-5 h-5" />
-                                    </button>
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 bg-slate-900 text-slate-300 text-sm p-3 rounded-lg shadow-xl z-20 text-left border border-slate-700">
+                                    <h5 className="font-bold text-slate-100 mb-1">심화(고시) 학습 모드</h5>
+                                    <p>변호사 시험 준비처럼 분석, 이해, 암송, 시험의 4단계로 학습합니다. 논리적, 신학적 깊이에 집중합니다.</p>
                                 </div>
                             )}
                         </div>
                     </div>
-
                 </div>
             </div>
-            <style>{`
-                @keyframes fade-in {
-                  from { opacity: 0; transform: translateY(-10px); }
-                  to { opacity: 1; transform: translateY(0); }
-                }
-                .animate-fade-in {
-                  animation: fade-in 0.3s ease-out forwards;
-                }
-            `}</style>
         </div>
     );
 };
