@@ -5,24 +5,78 @@ import { parseReference } from './bibleUtils';
 // Heuristics-based Fallback Quiz Generation
 // This version aims to select more meaningful words for blanks compared to pure random selection.
 
-// 1. Define Korean stop words (불용어). These are common function words that are
-//    unlikely to be core concepts for a fill-in-the-blank quiz.
-const KOREAN_STOP_WORDS = [
-  // Particles (조사)
-  '은', '는', '이', '가', '을', '를', '의', '에', '에게', '께', '께서', '에서',
-  '으로', '로', '와', '과', '보다', '처럼', '같이', '만큼', '만', '도', '뿐',
-  '부터', '까지', '라도', '이나', '나',
-  // Conjunctions (접속사)
-  '그리고', '그러나', '그래서', '하지만', '또는', '및', '하고',
-  // Pronouns/Determiners (대명사/관형사)
-  '그', '저', '이것', '저것', '그것', '무엇', '누구',
-  '모든', '각각', '한', '두', '세',
-  // Common verbs/adjectives (ending forms) that are less likely to be keywords
-  '있는', '없는',
-  '있으니', '있고', '있으며', '있으매', '있었더라', '있느니라', '있으리라',
-  '하시니', '하시고', '하였더라', '하리니', '하매', '하되',
+const stripPunctuation = (word: string) =>
+    word.replace(/[.,;?!:'"()\[\]{}—–\-]/g, ''); // '-' 추가 및 기타 특수문자 정리
+
+// 문장 성분에 영향을 주지 않는 조사, 연결어미, 보조사, 감탄사 등
+const KOREAN_STOP_WORDS: string[] = [
+    // 격 조사
+    '이', '가', '을', '를', '은', '는', '도', '만', '께서', '에서', '에게', '와', '과', '의', 
+    
+    // 접속 부사/관형사/보조사
+    '그리고', '그러나', '그러므로', '하지만', '또는', '즉', '따라서', '혹은', '및', '또', '저', '그', '이', '것', 
+    
+    // 감탄사, 기타 불용어
+    '아', '휴', '어', '저런', '에이', '예', '네', '아니', '뭐', '좀', '좀더', '다시', '계속', '바로', 
+    
+    // 시간 및 수량 표현 (맥락에 따라 불용어 아닐 수 있음, 일반적인 경우 필터링)
+    '현재', '또한', '역시', '매우', '가장', '더', '덜', '무엇', '어떤', '모든', '각', '약', '몇', 
+    
+    // ~이다, ~하다의 어간
+    '이다', '하다',
 ];
 
+// 동사/형용사 어미, 문장 종결 및 연결 어미 (조사/어미 결합 형태 포함)
+const VERB_OR_PARTICLE_ENDINGS: string[] = [
+    // 종결 어미 및 연결 어미
+    '다', '까', '나', '요', '지', '네', '고', '면', '며', '서', '지만', '으니', '으나', '건만', '으나마',
+    
+    // ~했다, ~하는
+    '했', '하는', '한', '할', '하게', '하도록', '하여', '하여야', '하는지', 
+    
+    // 피동/사동 접미사 (문장에 따라 명사가 될 수 있어 주의 필요)
+    '되', '시키', '받', '드리', 
+    
+    // 경어/의문/평서
+    '습니다', 'ㅂ니다', '어요', '았어요', '였어요', 'ㄹ까요', '습니까', 'ㅂ니까', '었', '았', 'ㄹ', '게', '자',
+    
+    // 부사격 조사 및 연결
+    '으로', '로써', '으로써', '부터', '까지', '처럼', '만큼', '같이',
+];
+
+const isStopWord = (word: string) => KOREAN_STOP_WORDS.includes(word);
+
+const isLikelyNoun = (cleanWord: string): boolean => {
+  if (!cleanWord) return false;
+  if (cleanWord.length < 2) return false;
+  if (!/[?-?]/.test(cleanWord)) {
+    if (/^\d+$/.test(cleanWord)) return false;
+    if (!/^\d+[?-?]/.test(cleanWord)) return false;
+  }
+  if (isStopWord(cleanWord)) return false;
+  if (VERB_OR_PARTICLE_ENDINGS.some(ending => cleanWord.endsWith(ending))) {
+    return false;
+  }
+  return true;
+};
+
+const PRIORITY_KEYWORDS = ['하나님', '여호와', '예수', '그리스도', '성령', '언약', 
+  '믿음', '복음', '생명', '은혜', '왕', '나라', '영광', '구원', '영생', '사랑', '십자가',
+  '어린양', '창조', '천국', '말씀', '찬양', '사도', '가브라엘' , '미가엘'];
+
+const scoreCandidate = (cleanWord: string): number => {
+  let score = cleanWord.length;
+  if (/^[가-힣]+$/.test(cleanWord)) {
+    score += 1;
+  }
+  if (PRIORITY_KEYWORDS.some(keyword => cleanWord.includes(keyword))) {
+    score += 3;
+  }
+  if (/^\d+[가-힣]/.test(cleanWord)) {
+    score += 0.5;
+  }
+  return score;
+};
 
 /**
  * AI가 유효한 퀴즈를 생성하지 못했을 때 DB 기반의 대체 퀴즈를 생성합니다.
@@ -62,34 +116,31 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
 
     const originalWords = verseText.split(/\s+/);
 
-    // 2. Filter for eligible words based on heuristics.
-    let eligibleWords = originalWords
-      .map(word => ({
-          original: word,
-          // For analysis, use a clean version without punctuation.
-          clean: word.replace(/[.,;?!:'"()]/g, ''),
-      }))
-      .filter(({ clean }) => 
-        clean.length >= 2 && // Rule: Must be at least 2 characters long.
-        !/^\d+$/.test(clean) && // Rule: Cannot be purely a number.
-        !KOREAN_STOP_WORDS.includes(clean) // Rule: Cannot be a stop word.
-      );
+    const candidates = originalWords.map(word => {
+        const clean = stripPunctuation(word);
+        return {
+            original: word,
+            clean,
+            score: scoreCandidate(clean),
+        };
+    });
 
-    // If heuristics filter out everything, revert to a simpler logic (any word > 2 chars).
+    // 2. Filter for eligible words based on heuristics favoring nouns and key terms.
+    let eligibleWords = candidates.filter(({ clean }) => isLikelyNoun(clean));
+
+    // If heuristics filter out everything, revert to a simpler logic (any non-stop word > 2 chars).
     if (eligibleWords.length === 0) {
-        eligibleWords = originalWords
-            .map(word => ({ original: word, clean: word.replace(/[.,;?!:'"()]/g, '') }))
-            .filter(({ clean }) => clean.length >= 2 && !/^\d+$/.test(clean));
-        
-        // If still no words, skip this line.
+        eligibleWords = candidates.filter(({ clean }) =>
+            clean.length >= 2 && !/^\d+$/.test(clean) && !isStopWord(clean)
+        );
         if (eligibleWords.length === 0) continue;
     }
 
-    // 3. Sort candidates by length. Longer words are often more significant.
-    eligibleWords.sort((a, b) => b.clean.length - a.clean.length);
+    // 3. Sort candidates by score (length + priority keyword bonus).
+    eligibleWords.sort((a, b) => b.score - a.score);
 
-    // 4. Pick from the top candidates to add variety, not always picking the longest.
-    const selectionPool = eligibleWords.slice(0, 3); // Top 3 candidates
+    // 4. Pick from the best-scoring candidates to add variety.
+    const selectionPool = eligibleWords.slice(0, Math.min(3, eligibleWords.length));
     const chosenWord = selectionPool[Math.floor(Math.random() * selectionPool.length)];
 
     const answerWord = chosenWord.original;

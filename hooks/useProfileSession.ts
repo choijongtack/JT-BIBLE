@@ -6,6 +6,8 @@ import { supabase } from '../services/supabaseClient';
 // FIX: Changed import from Session to AuthSession and aliased as Session. In some versions of supabase-js, the session type was exported as AuthSession.
 import type { AuthSession as Session } from '@supabase/supabase-js';
 
+const EMAIL_CONFIRMATION_REQUIRED = false;
+
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'awaiting-confirmation' | 'profile_error';
 
 export const useProfileSession = () => {
@@ -31,7 +33,11 @@ export const useProfileSession = () => {
             // event with a session, but the user's email is not yet confirmed. This block
             // catches that specific case to prevent the app from treating it as a full login.
             // It ensures the 'awaiting-confirmation' screen is shown.
-            if (_event === 'SIGNED_IN' && !session.user.email_confirmed_at) {
+            if (
+                EMAIL_CONFIRMATION_REQUIRED &&
+                _event === 'SIGNED_IN' &&
+                !session.user.email_confirmed_at
+            ) {
                 setAuthStatus('awaiting-confirmation');
                 return;
             }
@@ -83,7 +89,17 @@ export const useProfileSession = () => {
         setAuthError(null);
         try {
             await registerUser(email, password);
-            setAuthStatus('awaiting-confirmation');
+            if (!EMAIL_CONFIRMATION_REQUIRED) {
+                try {
+                    await logoutUser();
+                } catch (logoutError) {
+                    console.warn('Auto logout after registration failed', logoutError);
+                } finally {
+                    setSession(null);
+                    setProfile(null);
+                }
+            }
+            setAuthStatus(EMAIL_CONFIRMATION_REQUIRED ? 'awaiting-confirmation' : 'login');
         } catch (e) {
             const message = e instanceof Error ? e.message : '가입 실패';
             setAuthError(message);
