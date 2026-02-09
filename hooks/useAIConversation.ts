@@ -9,6 +9,7 @@ import { QuestionType } from '../types';
 import { createFallbackQuiz, constructEnforcedPrompt, normalizeText } from '../services/learningSessionUtils';
 import { parseReference } from '../services/bibleUtils';
 import { buildSystemInstruction } from '../services/instructionTemplate';
+import { buildCalvinContextBlock, searchCalvinChunks } from '../services/calvinCitationService';
 
 // FIX: Corrected the malformed ProcessedResponse interface which contained a pasted error message.
 export interface ProcessedResponse {
@@ -31,6 +32,51 @@ interface UseAIConversationProps {
 // FIX: Corrected the ApiChatMessage type to only include roles supported by the Perplexity/ChatGPT APIs.
 // The 'model' role is specific to our internal state and is mapped to 'assistant' before being sent.
 type ApiChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
+const CALVIN_CITATION_POLICY = `
+[출처 인용 규칙 - 필수]
+- 신학적 해석, 적용, 교리 판단이 포함된 문장에는 반드시 출처 태그를 붙이세요.
+- 허용 형식은 다음 둘 중 하나입니다: [기독교강요 p.123], [Inst.3.2.7]
+- 출처 태그가 없는 단정 문장은 작성하지 마세요.
+- 출처를 모르면 추측하지 말고 "출처 확인 필요"라고 명시하세요.
+`.trim();
+
+const CALVIN_PAGE_CITATION_REGEX = /\[기독교강요\s*p\.\s*\d+(?:\s*[-–]\s*\d+)?\]/;
+const CALVIN_REF_CITATION_REGEX = /\[Inst\.\d+\.\d+\.\d+\]/i;
+
+const hasCalvinCitation = (text: string): boolean => {
+    return CALVIN_PAGE_CITATION_REGEX.test(text) || CALVIN_REF_CITATION_REGEX.test(text);
+};
+
+const isControlOrBootstrapMessage = (userMessage: string): boolean => {
+    const normalized = userMessage.trim();
+    if (!normalized) return true;
+    if (normalized.startsWith('[시스템 액션]')) return true;
+    if (normalized.includes('학습을 시작해주세요')) return true;
+    if (normalized.includes('다음 단계')) return true;
+    if (normalized.includes('강제 이동')) return true;
+    return false;
+};
+
+const isQuestionOnlyTutorTurn = (text: string): boolean => {
+    const cleaned = text.trim();
+    if (!cleaned) return false;
+    const questionMarks = (cleaned.match(/\?/g) || []).length;
+    if (questionMarks === 0) return false;
+    // 질문 위주의 턴(첫 진입/단계 진행)에서는 인용 강제를 하지 않는다.
+    const hasDeclarativeEnding = /[.!]\s*$/.test(cleaned);
+    return !hasDeclarativeEnding;
+};
+
+const requiresCalvinCitation = (processed: ProcessedResponse, userMessage: string): boolean => {
+    if (isControlOrBootstrapMessage(userMessage)) return false;
+    if (processed.quizStarted || processed.evaluationFeedback) return false;
+    const cleaned = processed.cleanedText.trim();
+    if (cleaned.length < 25) return false;
+    if (isQuestionOnlyTutorTurn(cleaned)) return false;
+    if (cleaned.startsWith('[NEXT_STEP:') || cleaned.startsWith('[START_TEST]') || cleaned.startsWith('[COMPLETE]')) return false;
+    return true;
+};
 
 export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bibleVerse }: UseAIConversationProps) => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -168,19 +214,25 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
         setProcessedResponse(null);
     
         try {
-            let responseText: string;
-            const systemInstruction = buildSystemInstruction(topic, mode);
+            const systemInstruction = `${buildSystemInstruction(topic, mode)}\n\n${CALVIN_CITATION_POLICY}`;
+            let calvinContextBlock = '';
+            if (!isControlOrBootstrapMessage(messageContent)) {
+                const query = `${topic}\n${messageContent}`;
+                const chunks = await searchCalvinChunks(query, 3);
+                calvinContextBlock = buildCalvinContextBlock(chunks);
+            }
+            const messageForModel = calvinContextBlock
+                ? `${messageContent}\n\n${calvinContextBlock}`
+                : messageContent;
 
-            // For Gemini, the system instruction is a separate parameter.
-            if (aiModel === 'gemini') {
-                const finalApiMessage = constructEnforcedPrompt(messageContent, topic, bibleVerse, options);
-                responseText = await continueGeminiConversation(chatHistory, finalApiMessage, topic, mode);
+            const callModelWithMessage = async (messageForModel: string): Promise<string> => {
+                // For Gemini, the system instruction is a separate parameter.
+                if (aiModel === 'gemini') {
+                    const finalApiMessage = constructEnforcedPrompt(messageForModel, topic, bibleVerse, options);
+                    return continueGeminiConversation(chatHistory, finalApiMessage, topic, mode);
+                }
 
-            // For ChatGPT and Perplexity, the system instruction is the first message in the history.
-            } else {
-                // FIX: Correctly map internal ChatMessage roles ('user' | 'model' | 'system') to the
-                // roles expected by the external APIs ('user' | 'assistant' | 'system'). This resolves
-                // the type error when calling the conversation services.
+                // For ChatGPT and Perplexity, the system instruction is the first message in the history.
                 const historyForApi: ApiChatMessage[] = chatHistory.map((m): ApiChatMessage => {
                     switch (m.role) {
                         case 'model': return { role: 'assistant', content: m.content };
@@ -189,15 +241,32 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
                     }
                 });
 
-                // If history is empty, this is the first turn. Prepend the system instruction.
                 if (historyForApi.length === 0) {
                     historyForApi.unshift({ role: 'system', content: systemInstruction });
                 }
 
                 if (aiModel === 'perplexity') {
-                    responseText = await continuePerplexityConversation(historyForApi, messageContent);
-                } else { // chatgpt
-                    responseText = await continueChatGptConversation(historyForApi, messageContent);
+                    return continuePerplexityConversation(historyForApi, messageForModel);
+                }
+                return continueChatGptConversation(historyForApi, messageForModel);
+            };
+
+            let responseText = await callModelWithMessage(messageForModel);
+            let processed = processAIResponse(responseText);
+
+            if (requiresCalvinCitation(processed, messageContent) && !hasCalvinCitation(processed.cleanedText)) {
+                const retryInstruction = [
+                    "직전 답변을 다시 작성하세요.",
+                    "모든 신학적 주장 문장 끝에 반드시 인용 태그를 붙이세요.",
+                    "허용 형식: [기독교강요 p.123] 또는 [Inst.3.2.7]",
+                    "출처를 모르면 '출처 확인 필요'로 명시하세요.",
+                ].join('\n');
+
+                responseText = await callModelWithMessage(`${messageForModel}\n\n${retryInstruction}`);
+                processed = processAIResponse(responseText);
+
+                if (requiresCalvinCitation(processed, messageContent) && !hasCalvinCitation(processed.cleanedText)) {
+                    throw new Error("AI 응답에 기독교 강요 인용 태그가 없어 표시하지 않았습니다. 다시 시도해 주세요.");
                 }
             }
 
@@ -212,7 +281,6 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
                  setChatHistory(prev => [...prev, newUserMessage, newModelMessage]);
             }
             
-            const processed = processAIResponse(responseText);
             setProcessedResponse(processed);
       
         } catch (err) {
