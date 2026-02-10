@@ -43,6 +43,19 @@ When the user sends a normal message (not system control message), app now:
 2. injects top chunks into model prompt
 3. enforces citation tags in final answer
 
+## 6) Web interpretation search for Gemini/ChatGPT
+Added Edge Function:
+- `supabase/functions/web-search-proxy/index.ts`
+
+Required secret:
+- `SERPAPI_API_KEY`
+
+Deploy:
+```powershell
+supabase functions deploy web-search-proxy
+supabase secrets set SERPAPI_API_KEY=YOUR_SERPAPI_KEY
+```
+
 Main code:
 - `services/calvinCitationService.ts`
 - `hooks/useAIConversation.ts`

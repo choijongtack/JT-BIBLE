@@ -200,3 +200,48 @@ export const generatePrayerForTopic = async (topic: string, mode: 'general' | 'a
         throw new Error(`기도문을 생성하지 못했습니다: ${errorMessage}`);
     }
 };
+
+export const getCalvinInterpretationFromChatGpt = async (
+    koreanQuestion: string,
+    englishQuery: string,
+    sourceChunks: { page_from: number; page_to: number; content: string }[],
+    webSourcesText: string = ''
+): Promise<string> => {
+    const sourceBlock = sourceChunks
+        .map((c, idx) => {
+            const p = c.page_from === c.page_to ? `p.${c.page_from}` : `p.${c.page_from}-${c.page_to}`;
+            return `[${idx + 1}] ${p}\n${c.content}`;
+        })
+        .join('\n\n');
+
+    const prompt = [
+        'You are a theology assistant.',
+        'Use the provided Calvin Institutes excerpts as primary source and respond in Korean.',
+        'Output exactly two sections with these headings:',
+        '원본 내용:',
+        '해석 내용:',
+        '',
+        `한국어 질문: ${koreanQuestion}`,
+        `영어 검색 질의: ${englishQuery}`,
+        '',
+        '[Calvin source excerpts]',
+        sourceBlock || '(no local source excerpts found)',
+        '',
+        '[Web interpretation sources]',
+        webSourcesText || '(no web interpretation sources)',
+    ].join('\n');
+
+    const data = await callChatGptCompletion({
+        model: GPT_MODEL,
+        messages: [
+            { role: 'system', content: 'You are a precise theological assistant.' },
+            { role: 'user', content: prompt },
+        ],
+    });
+
+    const content = data?.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+        throw new Error('ChatGPT interpretation response was empty.');
+    }
+    return content;
+};

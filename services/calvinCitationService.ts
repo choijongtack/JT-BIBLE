@@ -15,7 +15,7 @@ const extractGeminiText = (data: any): string | null => {
   return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
 };
 
-const translateKoreanQueryToEnglish = async (queryText: string): Promise<string> => {
+export const translateKoreanQueryToEnglish = async (queryText: string): Promise<string> => {
   if (!HANGUL_REGEX.test(queryText)) return queryText;
 
   const prompt = [
@@ -39,9 +39,7 @@ const translateKoreanQueryToEnglish = async (queryText: string): Promise<string>
 
   const translated = extractGeminiText(data);
   if (!translated) return queryText;
-
-  // Keep the original query terms together to avoid losing context.
-  return `${translated} ${queryText}`.trim();
+  return translated.trim();
 };
 
 export const searchCalvinChunks = async (queryText: string, matchCount = 3): Promise<CalvinChunk[]> => {
@@ -62,6 +60,27 @@ export const searchCalvinChunks = async (queryText: string, matchCount = 3): Pro
   return (data || []) as CalvinChunk[];
 };
 
+export const searchCalvinChunksWithTranslation = async (
+  queryText: string,
+  matchCount = 5
+): Promise<{ translatedQuery: string; chunks: CalvinChunk[] }> => {
+  const q = queryText.trim();
+  if (!q) return { translatedQuery: '', chunks: [] };
+
+  const translatedQuery = await translateKoreanQueryToEnglish(q);
+  const { data, error } = await supabase.rpc('search_calvin_chunks', {
+    query_text: translatedQuery,
+    match_count: matchCount,
+  });
+
+  if (error) {
+    console.warn('search_calvin_chunks failed:', error.message);
+    return { translatedQuery, chunks: [] };
+  }
+
+  return { translatedQuery, chunks: (data || []) as CalvinChunk[] };
+};
+
 export const buildCalvinContextBlock = (chunks: CalvinChunk[]): string => {
   if (!chunks.length) return '';
   const lines = chunks.map((c, idx) => {
@@ -78,3 +97,4 @@ export const buildCalvinContextBlock = (chunks: CalvinChunk[]): string => {
     '- 신학적 주장 문장에는 반드시 [기독교강요 p.xxx] 또는 [Inst.x.x.x]를 붙이세요.',
   ].join('\n');
 };
+
