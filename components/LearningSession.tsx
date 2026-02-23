@@ -43,6 +43,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
 
   const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
+  const [isQuizUiActive, setIsQuizUiActive] = useState<boolean>(Boolean(savedSession.quizData) && !(savedSession.isComplete ?? false));
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(savedSession.currentQuestionIndex);
   const [score, setScore] = useState(savedSession.score);
   const [isCompleted, setIsCompleted] = useState(savedSession.isComplete ?? false);
@@ -82,13 +83,17 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
         setBibleVerseSource('AI');
       }
       if (processedResponse.stepChangedTo) setCurrentStep(processedResponse.stepChangedTo);
-      if (processedResponse.quizStarted) setQuizData(processedResponse.quizStarted);
+      if (processedResponse.quizStarted) {
+        setQuizData(processedResponse.quizStarted);
+        setIsQuizUiActive(false);
+        setCurrentStep(mode === 'general' ? LearningStep.MEMORIZE_AND_TEST : LearningStep.TEST);
+      }
       if (processedResponse.isComplete) setIsCompleted(true);
       if (processedResponse.evaluationFeedback) {
         setAiFeedback(processedResponse.evaluationFeedback);
       }
     }
-  }, [processedResponse, setBibleVerse, setBibleVerseSource]);
+  }, [processedResponse, setBibleVerse, setBibleVerseSource, mode]);
   
   // Effect for starting conversation
   useEffect(() => {
@@ -175,6 +180,11 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   };
 
   const handleAdvanceStepRequest = () => {
+    if (quizData && !isQuizUiActive && !isCompleted) {
+      setIsQuizUiActive(true);
+      return;
+    }
+
     const isPreTestStep =
       (mode === 'general' && currentStep === LearningStep.APPLICATION) ||
       (mode === 'advanced' && currentStep === LearningStep.MEMORIZATION);
@@ -235,6 +245,11 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
       setIsCompleted(true);
     }
   }, [quizData, currentQuestionIndex]);
+
+  const handleStartQuiz = useCallback(() => {
+    if (!quizData) return;
+    setIsQuizUiActive(true);
+  }, [quizData]);
 
   const handleRequestPrayer = useCallback(async () => {
     setIsGeneratingPrayer(true);
@@ -313,7 +328,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   
   const currentQuestion = quizData?.questions?.[currentQuestionIndex];
 
-  if (quizData && !isCompleted) {
+  if (quizData && isQuizUiActive && !isCompleted) {
     return (
       <div className="w-full max-w-7xl mx-auto p-2 sm:p-6 flex items-center justify-center">
         {currentQuestion ? (
@@ -493,6 +508,22 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
                     className="w-full max-w-xs mx-auto px-5 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-500 transition-colors text-lg disabled:bg-slate-600 disabled:cursor-wait">
                     {isGeneratingPrayer ? '기도문 생성 중...' : '기도하기'}
                 </button>
+            </div>
+          ) : quizData && !isQuizUiActive ? (
+            <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <p className="flex-1 text-sm text-slate-300">
+                  적용 단계 답변을 확인한 뒤 아래 버튼을 눌러 암송/시험을 시작하세요.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleStartQuiz}
+                  disabled={isLoading}
+                  className="px-5 py-2 bg-emerald-600 text-white font-semibold rounded-lg shadow-md hover:bg-emerald-500 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
+                >
+                  시험 시작
+                </button>
+              </div>
             </div>
           ) : (
             <div className="p-4 sm:p-6 border-t border-slate-700 flex-shrink-0">
