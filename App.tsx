@@ -354,7 +354,41 @@ const App: React.FC = () => {
         }
     }, [profile]);
 
-    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, mode?: 'general' | 'advanced') => {
+    const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, mode?: 'general' | 'advanced', customTopic?: string) => {
+        const normalizedCustomTopic = customTopic?.trim();
+        if (normalizedCustomTopic) {
+            const parsedCustomTopic = parseReference(normalizedCustomTopic);
+            if (!parsedCustomTopic) {
+                dispatch({ type: 'SET_ERROR', payload: `구절 형식이 올바르지 않습니다: ${normalizedCustomTopic}` });
+                return;
+            }
+
+            const customBook = parsedCustomTopic.book;
+            const savedCustomBookSession = profile?.progress?.[customBook]?.lastSession;
+            const finalAiModel = aiModel ?? savedCustomBookSession?.aiModel ?? 'gemini';
+            const finalMode = mode ?? savedCustomBookSession?.mode ?? 'general';
+
+            dispatch({ type: 'START_FEATURE_LOADING', payload: `'${normalizedCustomTopic}' 본문을 확인하는 중..` });
+            const verseResult = await getBibleVerse(normalizedCustomTopic);
+            if (verseResult.error || !verseResult.text) {
+                dispatch({ type: 'SET_ERROR', payload: verseResult.error || `선택한 구절 '${normalizedCustomTopic}'을(를) 찾지 못했습니다.` });
+                return;
+            }
+
+            const sessionToStart: LearningSessionState = {
+                topic: normalizedCustomTopic,
+                currentStep: finalMode === 'advanced' ? LearningStep.ANALYSIS : LearningStep.OBSERVATION,
+                messages: [],
+                aiModel: finalAiModel,
+                mode: finalMode,
+                bibleVerse: verseResult.text,
+                score: 0,
+                quizData: null,
+                currentQuestionIndex: 0
+            };
+            dispatch({ type: 'START_LEARNING', payload: sessionToStart });
+            return;
+        }
         dispatch({ type: 'START_FEATURE_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
     
         const savedBookProgress = profile?.progress?.[book];

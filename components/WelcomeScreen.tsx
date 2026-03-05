@@ -2,9 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { AiModel, AppStatus, Profile } from '../types';
 import { IconCheck, IconLoader, NEW_TESTAMENT_BOOKS, OLD_TESTAMENT_BOOKS } from '../constants';
 import { calculateVerseProgressForList, BIBLE_METADATA } from '../services/bibleData';
+import { parseReference } from '../services/bibleUtils';
 import { saveChatGptApiKey } from '../services/chatgptService';
 import { savePerplexityApiKey } from '../services/perplexityService';
 import CalvinChatModal from './CalvinChatModal';
+import DirectVersePickerModal from './DirectVersePickerModal';
 
 type ApiKeyStatus = 'unsaved' | 'saving' | 'saved' | 'error' | 'editing';
 
@@ -12,7 +14,7 @@ interface WelcomeScreenProps {
   status: AppStatus;
   loadingMessage: string;
   isActionLoading: boolean;
-  onStart: (book: string, aiModel: AiModel, mode?: 'general' | 'advanced') => void;
+  onStart: (book: string, aiModel: AiModel, mode?: 'general' | 'advanced', customTopic?: string) => void;
   profile: Profile | null;
   onLogout: () => void;
   onDelete: () => void;
@@ -59,6 +61,9 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const isLoading = status === 'loading' || isActionLoading;
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
   const [selectedAI, setSelectedAI] = useState<AiModel>('gemini');
+  const [customReference, setCustomReference] = useState('');
+  const [customReferenceError, setCustomReferenceError] = useState<string | null>(null);
+  const [isDirectPickerOpen, setIsDirectPickerOpen] = useState(false);
 
   const [isCalvinChatOpen, setIsCalvinChatOpen] = useState(false);
 
@@ -126,17 +131,36 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     }
   };
 
-  const savedSessionForSelectedBook = profile?.progress?.[selectedBook || '']?.lastSession;
+  const trimmedCustomReference = customReference.trim();
+  const parsedCustomReference = trimmedCustomReference ? parseReference(trimmedCustomReference) : null;
+  const selectedStartBook = parsedCustomReference?.book ?? selectedBook;
+
+  const savedSessionForSelectedBook = profile?.progress?.[selectedStartBook || '']?.lastSession;
   const isInProgress = Boolean(savedSessionForSelectedBook && !savedSessionForSelectedBook.isComplete);
   const inProgressMode = isInProgress ? savedSessionForSelectedBook?.mode : null;
 
   const isStartDisabled =
-    !selectedBook ||
+    !selectedStartBook ||
     (selectedAI === 'perplexity' && perplexityKeyStatus !== 'saved') ||
     (selectedAI === 'chatgpt' && chatGptKeyStatus !== 'saved');
 
   const isGeneralStartDisabled = isStartDisabled || (isInProgress && inProgressMode !== 'general');
   const isAdvancedStartDisabled = isStartDisabled || (isInProgress && inProgressMode !== 'advanced');
+
+  const handleStart = (mode: 'general' | 'advanced') => {
+    if (!selectedStartBook) {
+      setCustomReferenceError('학습할 성경을 선택하거나 구절을 직접 입력해 주세요.');
+      return;
+    }
+
+    if (trimmedCustomReference && !parsedCustomReference) {
+      setCustomReferenceError('구절 형식이 올바르지 않습니다. 예: 요한복음 3:16 또는 요한복음 3:16-18');
+      return;
+    }
+
+    setCustomReferenceError(null);
+    onStart(selectedStartBook, selectedAI, mode, parsedCustomReference ? trimmedCustomReference : undefined);
+  };
 
   const getApiErrorMessage = (error: string | null, onSwitchToGemini: () => void, modelName: string) => {
     if (!error) return null;
@@ -176,7 +200,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
     return (
       <button
-        onClick={() => setSelectedBook(book)}
+        onClick={() => {
+          setSelectedBook(book);
+          setCustomReferenceError(null);
+        }}
         className={`group relative w-full rounded-md px-2 py-2 text-center text-sm transition-colors ${
           isSelected
             ? 'bg-blue-600 font-bold text-white'
@@ -201,7 +228,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const totalProgress = calculateVerseProgressForList(profile?.progress, [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
   const otProgress = calculateVerseProgressForList(profile?.progress, OLD_TESTAMENT_BOOKS);
   const ntProgress = calculateVerseProgressForList(profile?.progress, NEW_TESTAMENT_BOOKS);
-  const bookLastTopic = profile?.progress?.[selectedBook || '']?.lastSession?.topic;
+  const bookLastTopic = profile?.progress?.[selectedStartBook || '']?.lastSession?.topic;
 
   return (
     <div className="relative mx-auto w-full max-w-4xl rounded-2xl border border-slate-700 bg-slate-800/50 p-4 shadow-2xl backdrop-blur-sm sm:p-8">
@@ -313,10 +340,42 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             )}
           </div>
 
+          <div className="w-full max-w-lg">
+            <p className="mb-2 text-sm font-semibold text-slate-300">원하는 구절 직접 선택 (선택)</p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                onClick={() => setIsDirectPickerOpen(true)}
+                className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-500"
+              >
+                구절 선택 메뉴 열기
+              </button>
+              {customReference && (
+                <button
+                  onClick={() => {
+                    setCustomReference('');
+                    setCustomReferenceError(null);
+                  }}
+                  className="rounded-lg bg-slate-700 px-4 py-2 font-semibold text-slate-100 hover:bg-slate-600"
+                >
+                  직접 선택 해제
+                </button>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              직접 선택하면 책 선택보다 우선 적용됩니다.
+            </p>
+            {customReference && (
+              <p className="mt-2 rounded-md bg-slate-900/60 px-3 py-2 text-sm text-blue-300">
+                선택된 구절: {customReference}
+              </p>
+            )}
+            {customReferenceError && <p className="mt-2 text-xs text-red-400">{customReferenceError}</p>}
+          </div>
+
           <div className="mb-4 h-16 w-full text-center">
-            {selectedBook && (
+            {selectedStartBook && (
               <div className="mx-auto w-full max-w-sm rounded-lg bg-slate-900/50 p-3">
-                <p className="mb-1 text-sm font-semibold text-slate-300">{selectedBook}</p>
+                <p className="mb-1 text-sm font-semibold text-slate-300">{selectedStartBook}</p>
                 <p className="text-sm text-slate-400">{bookLastTopic ? `최근 학습: ${bookLastTopic}` : '아직 학습 기록이 없습니다.'}</p>
               </div>
             )}
@@ -324,15 +383,15 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
           <div className="flex w-full flex-col gap-4 sm:w-auto sm:flex-row">
             <div className="relative flex-1" ref={generalInfoRef}>
-              <button onClick={() => selectedBook && onStart(selectedBook, selectedAI, 'general')} disabled={isGeneralStartDisabled} className="flex w-full items-center justify-center rounded-lg bg-blue-600 px-8 py-3 font-bold text-white hover:bg-blue-500 disabled:bg-slate-600">
-                <span>{selectedBook ? `${selectedBook} 일반 학습` : '일반 학습'}</span>
+              <button onClick={() => handleStart('general')} disabled={isGeneralStartDisabled} className="flex w-full items-center justify-center rounded-lg bg-blue-600 px-8 py-3 font-bold text-white hover:bg-blue-500 disabled:bg-slate-600">
+                <span>{selectedStartBook ? `${selectedStartBook} 일반 학습` : '일반 학습'}</span>
                 <span onClick={(e) => { e.stopPropagation(); setShowGeneralInfo((s) => !s); }}><IconQuestionMark className="ml-2 h-5 w-5 text-blue-200" /></span>
               </button>
               {showGeneralInfo && <div className="absolute bottom-full left-1/2 z-20 mb-2 w-72 -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-left text-sm text-slate-300"><h5 className="mb-1 font-bold text-slate-100">일반 학습 모드</h5><p>관찰, 해석, 적용, 요약/표현 4단계 학습입니다.</p></div>}
             </div>
             <div className="relative flex-1" ref={advancedInfoRef}>
-              <button onClick={() => selectedBook && onStart(selectedBook, selectedAI, 'advanced')} disabled={isAdvancedStartDisabled} className="flex w-full items-center justify-center rounded-lg bg-slate-600 px-8 py-3 font-bold text-white hover:bg-slate-500 disabled:bg-slate-700 disabled:text-slate-500">
-                <span>{selectedBook ? `${selectedBook} 심화 학습` : '심화 학습'}</span>
+              <button onClick={() => handleStart('advanced')} disabled={isAdvancedStartDisabled} className="flex w-full items-center justify-center rounded-lg bg-slate-600 px-8 py-3 font-bold text-white hover:bg-slate-500 disabled:bg-slate-700 disabled:text-slate-500">
+                <span>{selectedStartBook ? `${selectedStartBook} 심화 학습` : '심화 학습'}</span>
                 <span onClick={(e) => { e.stopPropagation(); setShowAdvancedInfo((s) => !s); }}><IconQuestionMark className="ml-2 h-5 w-5 text-slate-400" /></span>
               </button>
               {showAdvancedInfo && <div className="absolute bottom-full left-1/2 z-20 mb-2 w-72 -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-left text-sm text-slate-300"><h5 className="mb-1 font-bold text-slate-100">심화 학습 모드</h5><p>변증과 표현을 위한 분석 중심 학습입니다.</p></div>}
@@ -347,6 +406,15 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         aiModel={selectedAI}
         hasPerplexityKey={Boolean(profile?.perplexity_api_key)}
         hasChatGptKey={Boolean(profile?.chatgpt_api_key)}
+      />
+      <DirectVersePickerModal
+        isOpen={isDirectPickerOpen}
+        onClose={() => setIsDirectPickerOpen(false)}
+        onSelect={(reference) => {
+          setCustomReference(reference);
+          setCustomReferenceError(null);
+          setIsDirectPickerOpen(false);
+        }}
       />
     </div>
   );
