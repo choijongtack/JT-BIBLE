@@ -3,9 +3,33 @@ import { supabase, supabaseUrl } from './supabaseClient';
 import { buildSystemInstruction } from './instructionTemplate';
 import { BIBLE_METADATA } from './bibleData';
 
-const GPT_MODEL = 'gpt-4o';
-// 함수 URL은 내보낸 supabaseUrl을 사용하여 동적으로 구성됩니다.
+const PREFERRED_CHATGPT_MODEL_KEY = 'jt-bible-chatgpt-model';
+const DEFAULT_CHATGPT_MODEL = (import.meta.env.VITE_CHATGPT_MODEL as string | undefined)?.trim() || 'gpt-4o';
+const CHATGPT_FALLBACK_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini'];
+
 const PROXY_URL = `${supabaseUrl}/functions/v1/chatgpt-proxy`;
+
+export const setPreferredChatGptModel = (model: string) => {
+    if (!model?.trim()) return;
+    if (typeof window !== 'undefined') {
+        window.localStorage.setItem(PREFERRED_CHATGPT_MODEL_KEY, model.trim());
+    }
+};
+
+export const getChatGptModel = () => {
+    if (typeof window !== 'undefined') {
+        const stored = window.localStorage.getItem(PREFERRED_CHATGPT_MODEL_KEY);
+        if (stored?.trim()) return stored.trim();
+    }
+    if (DEFAULT_CHATGPT_MODEL) return DEFAULT_CHATGPT_MODEL;
+    return 'gpt-4o-mini';
+};
+
+const getModelCandidateList = (preferred: string) => {
+    const pref = preferred?.trim();
+    const candidates = [pref, ...CHATGPT_FALLBACK_MODELS];
+    return Array.from(new Set(candidates.filter((item): item is string => Boolean(item))));
+};
 
 /**
  * Gets the authorization headers required for calling the Supabase function.
@@ -28,44 +52,61 @@ const getAuthHeaders = async (): Promise<HeadersInit> => {
  * @param payload The request body to be sent to the OpenAI API.
  * @returns The JSON response from the API.
  */
-const callChatGptCompletion = async (payload: object): Promise<any> => {
-    let response: Response;
-    try {
-        const headers = await getAuthHeaders();
-        response = await fetch(`${PROXY_URL}/chatgpt-completion`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(payload)
-        });
-    } catch (e) {
-        if (e instanceof TypeError && e.message.includes('Failed to fetch')) {
-            throw new Error('네트워크 오류: ChatGPT 서비스에 연결할 수 없습니다. 인터넷 연결 상태를 확인하거나, 잠시 후 다시 시도해 주세요.');
+const callChatGptCompletion = async (payload: any): Promise<any> => {
+    const preferredModel = payload.model || getChatGptModel();
+    const modelOptions = getModelCandidateList(preferredModel);
+
+    const attemptRequest = async (payloadBody: object): Promise<any> => {
+        let response: Response;
+        try {
+            const headers = await getAuthHeaders();
+            response = await fetch(`${PROXY_URL}/chatgpt-completion`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(payloadBody)
+            });
+        } catch (e) {
+            if (e instanceof TypeError && e.message.includes('Failed to fetch')) {
+                throw new Error('네트워크 오류: ChatGPT 서비스에 연결할 수 없습니다. 인터넷 연결 상태를 확인하거나, 잠시 후 다시 시도해 주세요.');
+            }
+            throw e;
         }
-        throw e;
+
+        let data;
+        try {
+            data = await response.json();
+        } catch {
+            const errorText = await response.text();
+            throw new Error(`ChatGPT 프록시 오류: ${response.status} ${response.statusText}. 세부 정보: ${errorText.substring(0, 200)}`);
+        }
+
+        if (!response.ok || data.error) {
+            const originalMessage = data.error?.message || 'ChatGPT 프록시에서 응답을 가져오는 데 실패했습니다.';
+            if (originalMessage.toLowerCase().includes('model') && (originalMessage.toLowerCase().includes('not found') || originalMessage.toLowerCase().includes('does not exist') || originalMessage.toLowerCase().includes('unavailable') || originalMessage.toLowerCase().includes('invalid'))) {
+                throw new Error(`model-failure:${originalMessage}`);
+            }
+            throw new Error(originalMessage);
+        }
+        return data;
+    };
+
+    let lastError: Error | null = null;
+    for (const model of modelOptions) {
+        try {
+            const requestPayload = { ...payload, model };
+            const result = await attemptRequest(requestPayload);
+            return result;
+        } catch (rawError) {
+            const message = rawError instanceof Error ? rawError.message : String(rawError);
+            lastError = rawError instanceof Error ? rawError : new Error(message);
+            if (!message.startsWith('model-failure:')) {
+                throw rawError;
+            }
+            console.warn(`ChatGPT 모델 '${model}'에서 실패했습니다. 다음 후보 모델을 시도합니다.`, message);
+        }
     }
 
-    let data;
-    try {
-        data = await response.json();
-    } catch {
-        const errorText = await response.text();
-        throw new Error(`ChatGPT 프록시 오류: ${response.status} ${response.statusText}. 세부 정보: ${errorText.substring(0, 200)}`);
-    }
-
-    if (!response.ok || data.error) {
-        const originalMessage = data.error?.message || 'ChatGPT 프록시에서 응답을 가져오는 데 실패했습니다.';
-        
-        if (originalMessage.toLowerCase().includes('quota')) {
-            throw new Error(`OpenAI 사용량 한도를 초과했습니다. OpenAI 대시보드의 '결제(Billing)' 섹션에서 플랜 및 결제 세부 정보를 확인해주세요. 이 오류는 일반적으로 무료 크레딧을 모두 사용했거나 설정된 사용 한도에 도달했을 때 발생합니다.`);
-        }
-        
-        if (originalMessage.toLowerCase().includes('incorrect api key') || originalMessage.toLowerCase().includes('invalid authentication')) {
-            throw new Error(`저장된 OpenAI API 키가 잘못되었습니다. 메인 화면으로 돌아가 '수정' 버튼을 눌러 올바른 API 키를 다시 저장해주세요.`);
-        }
-        
-        throw new Error(originalMessage);
-    }
-    return data;
+    throw lastError || new Error('ChatGPT 모델 요청에 실패했습니다. 모델 설정을 확인해주세요.');
 };
 
 /**
@@ -111,7 +152,7 @@ export const getStudyTopicForBook = async (book: string): Promise<string> => {
     
     try {
         const data = await callChatGptCompletion({
-            model: GPT_MODEL,
+            model: getChatGptModel(),
             messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
         });
         const topic = data.choices[0].message.content.trim();
@@ -139,7 +180,7 @@ export const getNextStudyTopic = async (currentTopic: string, bookName: string):
 
     try {
         const data = await callChatGptCompletion({
-             model: GPT_MODEL,
+             model: getChatGptModel(),
              messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
         });
 
@@ -162,7 +203,7 @@ export const continueLearningConversation = async (
     try {
         const messagesWithNew = [...currentHistory, { role: 'user' as const, content: message }];
         
-        const data = await callChatGptCompletion({ model: GPT_MODEL, messages: messagesWithNew });
+        const data = await callChatGptCompletion({ model: getChatGptModel(), messages: messagesWithNew });
 
         return data.choices[0].message.content;
 
@@ -185,7 +226,7 @@ export const generatePrayerForTopic = async (topic: string, mode: 'general' | 'a
     
     try {
         const data = await callChatGptCompletion({
-            model: GPT_MODEL,
+            model: getChatGptModel(),
             messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
         });
         const prayer = data.choices[0].message.content.trim();
@@ -232,7 +273,7 @@ export const getCalvinInterpretationFromChatGpt = async (
     ].join('\n');
 
     const data = await callChatGptCompletion({
-        model: GPT_MODEL,
+        model: getChatGptModel(),
         messages: [
             { role: 'system', content: 'You are a precise theological assistant.' },
             { role: 'user', content: prompt },

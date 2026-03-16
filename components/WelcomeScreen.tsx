@@ -3,7 +3,7 @@ import type { AiModel, AppStatus, Profile } from '../types';
 import { IconCheck, IconLoader, NEW_TESTAMENT_BOOKS, OLD_TESTAMENT_BOOKS } from '../constants';
 import { calculateVerseProgressForList, BIBLE_METADATA } from '../services/bibleData';
 import { parseReference } from '../services/bibleUtils';
-import { saveChatGptApiKey } from '../services/chatgptService';
+import { saveChatGptApiKey, getChatGptModel, setPreferredChatGptModel } from '../services/chatgptService';
 import { savePerplexityApiKey } from '../services/perplexityService';
 import CalvinChatModal from './CalvinChatModal';
 import DirectVersePickerModal from './DirectVersePickerModal';
@@ -66,6 +66,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const [isDirectPickerOpen, setIsDirectPickerOpen] = useState(false);
 
   const [isCalvinChatOpen, setIsCalvinChatOpen] = useState(false);
+  const [selectedChatGptModel, setSelectedChatGptModel] = useState<string>(getChatGptModel());
 
   const [perplexityApiKey, setPerplexityApiKey] = useState('');
   const [perplexityKeyStatus, setPerplexityKeyStatus] = useState<ApiKeyStatus>('unsaved');
@@ -94,6 +95,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       setPerplexityKeyStatus('unsaved');
       setPerplexityApiKey('');
     }
+    setSelectedChatGptModel(getChatGptModel());
   }, [profile]);
 
   useEffect(() => {
@@ -322,6 +324,23 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             {selectedAI === 'chatgpt' && (
               <div className="rounded-lg border border-teal-800/50 bg-slate-900/50 p-4">
                 <h5 className="mb-3 text-center font-semibold text-teal-300">ChatGPT API 키 관리</h5>
+                <div className="mb-3 text-sm text-slate-200">
+                  모델 선택: 
+                  <select
+                    value={selectedChatGptModel}
+                    onChange={(e) => {
+                      const nextModel = e.target.value;
+                      setSelectedChatGptModel(nextModel);
+                      setPreferredChatGptModel(nextModel);
+                    }}
+                    className="ml-2 rounded-md border border-slate-500 bg-slate-700 px-2 py-1 text-xs text-slate-100"
+                  >
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                    <option value="gpt-4o">gpt-4o</option>
+                    <option value="gpt-4.1">gpt-4.1</option>
+                    <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                  </select>
+                </div>
                 {chatGptKeyStatus === 'saved' ? (
                   <div className="flex items-center justify-between rounded-lg bg-slate-800 p-3">
                     <div className="flex items-center gap-2 text-green-400"><IconCheck className="h-5 w-5" /><span>API 키가 저장되었습니다.</span></div>
