@@ -78,6 +78,35 @@ const requiresCalvinCitation = (processed: ProcessedResponse, userMessage: strin
     return true;
 };
 
+const inferStepFromText = (text: string): LearningStep | undefined => {
+    const compact = text.replace(/\s+/g, ' ').trim();
+    if (!compact) return undefined;
+
+    // Fallback for responses that forgot to include [NEXT_STEP:...]
+    // but clearly announce a stage transition in natural language.
+    const transitionCue = /(이제|다음|곧|바로|넘어가|전환|진행|시작)/;
+    const hasTransitionCue = transitionCue.test(compact);
+
+    const stepMatchers: Array<{ step: LearningStep; regex: RegExp }> = [
+        { step: LearningStep.OBSERVATION, regex: /관찰\s*단계/ },
+        { step: LearningStep.INTERPRETATION, regex: /해석\s*단계/ },
+        { step: LearningStep.APPLICATION, regex: /적용\s*단계/ },
+        { step: LearningStep.MEMORIZE_AND_TEST, regex: /(암송\s*\/\s*시험|암송\/시험)\s*단계|시험을\s*시작/ },
+        { step: LearningStep.ANALYSIS, regex: /분석\s*단계/ },
+        { step: LearningStep.UNDERSTANDING, regex: /이해\s*단계/ },
+        { step: LearningStep.MEMORIZATION, regex: /암송\s*단계/ },
+        { step: LearningStep.TEST, regex: /시험\s*단계|테스트\s*단계/ },
+    ];
+
+    for (const { step, regex } of stepMatchers) {
+        if (regex.test(compact) && hasTransitionCue) {
+            return step;
+        }
+    }
+
+    return undefined;
+};
+
 export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bibleVerse }: UseAIConversationProps) => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [chatHistory, setChatHistory] = useState<ChatMessage[]>(initialChatHistory);
@@ -110,6 +139,9 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
           const stepValue = LearningStep[nextStepKey];
           if (stepValue) result.stepChangedTo = stepValue;
           cleanedText = cleanedText.replace(stepMatch[0], '').trim();
+        } else {
+          const inferredStep = inferStepFromText(cleanedText);
+          if (inferredStep) result.stepChangedTo = inferredStep;
         }
       
         const testMatchIndex = cleanedText.indexOf('[START_TEST]');
