@@ -297,7 +297,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             <div className="flex flex-wrap justify-center gap-4">
               <button onClick={() => setSelectedAI('gemini')} className={`rounded-lg px-5 py-2 font-semibold transition-all ${selectedAI === 'gemini' ? 'bg-blue-600 text-white ring-2 ring-blue-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}>Gemini 2.5 Flash</button>
               <button onClick={() => setSelectedAI('perplexity')} className={`rounded-lg px-5 py-2 font-semibold transition-all ${selectedAI === 'perplexity' ? 'bg-purple-600 text-white ring-2 ring-purple-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}>Perplexity Sonar</button>
-              <button onClick={() => setSelectedAI('chatgpt')} className={`rounded-lg px-5 py-2 font-semibold transition-all ${selectedAI === 'chatgpt' ? 'bg-teal-600 text-white ring-2 ring-teal-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}>ChatGPT 4.0</button>
+              <button onClick={() => setSelectedAI('chatgpt')} className={`rounded-lg px-5 py-2 font-semibold transition-all ${selectedAI === 'chatgpt' ? 'bg-teal-600 text-white ring-2 ring-teal-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}>ChatGPT 4o-mini</button>
             </div>
           </div>
 
@@ -336,7 +336,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                     className="ml-2 rounded-md border border-slate-500 bg-slate-700 px-2 py-1 text-xs text-slate-100"
                   >
                     <option value="gpt-4o-mini">gpt-4o-mini</option>
-                    <option value="gpt-4o">gpt-4o</option>
                     <option value="gpt-4.1">gpt-4.1</option>
                     <option value="gpt-4.1-mini">gpt-4.1-mini</option>
                   </select>

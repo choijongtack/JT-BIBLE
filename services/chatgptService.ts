@@ -4,24 +4,31 @@ import { buildSystemInstruction } from './instructionTemplate';
 import { BIBLE_METADATA } from './bibleData';
 
 const PREFERRED_CHATGPT_MODEL_KEY = 'jt-bible-chatgpt-model';
-const DEFAULT_CHATGPT_MODEL = (import.meta.env.VITE_CHATGPT_MODEL as string | undefined)?.trim() || 'gpt-4o';
-const CHATGPT_FALLBACK_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini'];
+const CHATGPT_ALLOWED_MODELS = ['gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini'] as const;
+const DEFAULT_CHATGPT_MODEL = (import.meta.env.VITE_CHATGPT_MODEL as string | undefined)?.trim() || 'gpt-4o-mini';
+const CHATGPT_FALLBACK_MODELS = [...CHATGPT_ALLOWED_MODELS];
 
 const PROXY_URL = `${supabaseUrl}/functions/v1/chatgpt-proxy`;
 
 export const setPreferredChatGptModel = (model: string) => {
-    if (!model?.trim()) return;
+    const nextModel = model?.trim();
+    if (!nextModel || !CHATGPT_ALLOWED_MODELS.includes(nextModel as typeof CHATGPT_ALLOWED_MODELS[number])) return;
     if (typeof window !== 'undefined') {
-        window.localStorage.setItem(PREFERRED_CHATGPT_MODEL_KEY, model.trim());
+        window.localStorage.setItem(PREFERRED_CHATGPT_MODEL_KEY, nextModel);
     }
 };
 
 export const getChatGptModel = () => {
     if (typeof window !== 'undefined') {
         const stored = window.localStorage.getItem(PREFERRED_CHATGPT_MODEL_KEY);
-        if (stored?.trim()) return stored.trim();
+        const normalizedStored = stored?.trim();
+        if (normalizedStored && CHATGPT_ALLOWED_MODELS.includes(normalizedStored as typeof CHATGPT_ALLOWED_MODELS[number])) {
+            return normalizedStored;
+        }
     }
-    if (DEFAULT_CHATGPT_MODEL) return DEFAULT_CHATGPT_MODEL;
+    if (DEFAULT_CHATGPT_MODEL && CHATGPT_ALLOWED_MODELS.includes(DEFAULT_CHATGPT_MODEL as typeof CHATGPT_ALLOWED_MODELS[number])) {
+        return DEFAULT_CHATGPT_MODEL;
+    }
     return 'gpt-4o-mini';
 };
 
