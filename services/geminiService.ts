@@ -99,9 +99,18 @@ export const getNextStudyTopic = async (currentTopic: string, bookName: string):
     }
 };
 
-export const continueLearningConversation = async (currentHistory: ChatMessage[], message: string, topic: string, mode: 'general' | 'advanced'): Promise<string> => {
+export const continueLearningConversation = async (
+    currentHistory: ChatMessage[],
+    message: string,
+    topic: string,
+    mode: 'general' | 'advanced',
+    extraSystemInstruction?: string
+): Promise<string> => {
     try {
-        const systemInstruction = buildSystemInstruction(topic, mode);
+        const baseSystemInstruction = buildSystemInstruction(topic, mode);
+        const systemInstruction = extraSystemInstruction?.trim()
+            ? `${baseSystemInstruction}\n\n${extraSystemInstruction.trim()}`
+            : baseSystemInstruction;
         const newUserMessage: ChatMessage = { role: 'user', content: message };
         
         const payload = {

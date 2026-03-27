@@ -261,7 +261,7 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
                 // For Gemini, the system instruction is a separate parameter.
                 if (aiModel === 'gemini') {
                     const finalApiMessage = constructEnforcedPrompt(messageForModel, topic, bibleVerse, options);
-                    return continueGeminiConversation(chatHistory, finalApiMessage, topic, mode);
+                    return continueGeminiConversation(chatHistory, finalApiMessage, topic, mode, CALVIN_CITATION_POLICY);
                 }
 
                 // For ChatGPT and Perplexity, the system instruction is the first message in the history.
@@ -280,7 +280,9 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
                 if (aiModel === 'perplexity') {
                     return continuePerplexityConversation(historyForApi, messageForModel);
                 }
-                return continueChatGptConversation(historyForApi, messageForModel);
+                // Align ChatGPT behavior with Gemini by applying the same passage-enforced/flexible wrapper.
+                const finalApiMessage = constructEnforcedPrompt(messageForModel, topic, bibleVerse, options);
+                return continueChatGptConversation(historyForApi, finalApiMessage);
             };
 
             let responseText = await callModelWithMessage(messageForModel);
