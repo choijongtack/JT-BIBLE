@@ -190,3 +190,15 @@ export const testUpdateProgress = async () => {
         alert("Test update appears to have succeeded. Check the console to verify the 'before' and 'after' states.");
     }
 };
+
+export const sendPasswordResetEmail = async (email: string) => {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/reset-password`,
+  });
+  if (error) throw error;
+};
+
+export const updatePassword = async (password: string) => {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+};

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 
 interface DeleteConfirmationModalProps {
     isOpen: boolean;
@@ -7,6 +7,13 @@ interface DeleteConfirmationModalProps {
 }
 
 const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({ isOpen, onConfirm, onCancel }) => {
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleKeyDown = (event: KeyboardEvent) => event.key === 'Escape' && onCancel();
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onCancel]);
+
     if (!isOpen) return null;
 
     return (
@@ -15,13 +22,14 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({ isOpe
             onClick={onCancel}
             aria-modal="true"
             role="dialog"
+            aria-labelledby="delete-confirm-title"
         >
             <div
                 className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md flex flex-col border border-slate-700"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="p-6 sm:p-8 text-center">
-                    <h2 className="text-2xl font-bold text-slate-100 mb-4">회원탈퇴를 진행하시겠습니까?</h2>
+                    <h2 id="delete-confirm-title" className="text-2xl font-bold text-slate-100 mb-4">회원탈퇴를 진행하시겠습니까?</h2>
                     <p className="text-slate-400">
                         이 작업은 되돌릴 수 없으며 모든 학습 기록이 영구적으로 삭제됩니다.
                     </p>

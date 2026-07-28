@@ -11,8 +11,11 @@ export interface CalvinChunk {
 const HANGUL_REGEX = /[가-힣]/;
 const GEMINI_PROXY_FUNCTION_NAME = 'gemini-proxy';
 
-const extractGeminiText = (data: any): string | null => {
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+const extractGeminiText = (data: unknown): string | null => {
+  const response = data as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  return response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
 };
 
 export const translateKoreanQueryToEnglish = async (queryText: string): Promise<string> => {
@@ -97,4 +100,3 @@ export const buildCalvinContextBlock = (chunks: CalvinChunk[]): string => {
     '- 신학적 주장 문장에는 반드시 [기독교강요 p.xxx] 또는 [Inst.x.x.x]를 붙이세요.',
   ].join('\n');
 };
-

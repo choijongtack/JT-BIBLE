@@ -5,9 +5,10 @@ interface LoginScreenProps {
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (email: string, password: string) => Promise<void>;
   error: string | null;
+  onResetPassword: (email: string) => Promise<void>;
 }
 
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error }) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, onResetPassword, error }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -15,6 +16,8 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   useEffect(() => {
     setLocalError(error);
@@ -55,6 +58,15 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
       setLocalError(null);
   };
 
+  const handleReset = async () => {
+    setLocalError(null);
+    if (!email) return setLocalError('비밀번호 재설정 이메일을 입력해주세요.');
+    setIsSubmitting(true);
+    try { await onResetPassword(email); setResetSent(true); }
+    catch (err) { setLocalError(err instanceof Error ? err.message : '이메일 발송에 실패했습니다.'); }
+    finally { setIsSubmitting(false); }
+  };
+
   return (
       <div className="w-full max-w-md">
         <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
@@ -76,6 +88,13 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
             </div>
           )}
 
+          {isResetting ? <div className="space-y-5">
+            <p className="text-slate-300 text-center">가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내드립니다.</p>
+            {resetSent && <p className="text-green-400 text-center text-sm">재설정 이메일을 확인해주세요.</p>}
+            <input id="reset-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-lg text-white" required />
+            <button onClick={handleReset} disabled={isSubmitting} className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl disabled:bg-slate-600">{isSubmitting ? '발송 중...' : '재설정 이메일 보내기'}</button>
+            <button type="button" onClick={() => { setIsResetting(false); setResetSent(false); }} className="w-full text-sm text-blue-400">로그인으로 돌아가기</button>
+          </div> : <>
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
@@ -150,6 +169,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
                     type="button"
                     className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
                     disabled={isSubmitting}
+                    onClick={() => setIsResetting(true)}
                   >
                     비밀번호 찾기
                   </button>
@@ -181,7 +201,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onRegister, error })
             <div className="relative flex justify-center text-sm">
               <span className="px-4 bg-slate-800 text-slate-400">또는</span>
             </div>
-          </div>
+          </div></>}
 
           {/* Sign up / Login toggle */}
           <div className="text-center">

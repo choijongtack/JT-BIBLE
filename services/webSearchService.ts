@@ -24,11 +24,14 @@ export const searchInterpretationWeb = async (
 
   const items = Array.isArray(data?.results) ? data.results : [];
   return items
-    .map((i: any) => ({
-      title: String(i?.title || ''),
-      url: String(i?.url || ''),
-      snippet: String(i?.snippet || ''),
-    }))
+    .map((i: unknown) => {
+      const item = i as Partial<WebSearchItem>;
+      return ({
+      title: String(item.title || ''),
+      url: String(item.url || ''),
+      snippet: String(item.snippet || ''),
+    });
+    })
     .filter((i: WebSearchItem) => i.title || i.url || i.snippet);
 };
 
@@ -38,4 +41,3 @@ export const buildWebSourcesBlock = (sources: WebSearchItem[]): string => {
     .map((s, idx) => `(${idx + 1}) ${s.title}\nURL: ${s.url}\n요약: ${s.snippet}`)
     .join('\n\n');
 };
-

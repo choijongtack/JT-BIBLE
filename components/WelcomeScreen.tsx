@@ -3,8 +3,8 @@ import type { AiModel, AppStatus, Profile } from '../types';
 import { IconCheck, IconLoader, NEW_TESTAMENT_BOOKS, OLD_TESTAMENT_BOOKS } from '../constants';
 import { calculateVerseProgressForList, BIBLE_METADATA } from '../services/bibleData';
 import { parseReference } from '../services/bibleUtils';
-import { saveChatGptApiKey, getChatGptModel, setPreferredChatGptModel } from '../services/chatgptService';
-import { savePerplexityApiKey } from '../services/perplexityService';
+import { saveChatGptApiKey, deleteChatGptApiKey, getChatGptModel, setPreferredChatGptModel } from '../services/chatgptService';
+import { savePerplexityApiKey, deletePerplexityApiKey } from '../services/perplexityService';
 import CalvinChatModal from './CalvinChatModal';
 import DirectVersePickerModal from './DirectVersePickerModal';
 
@@ -20,6 +20,8 @@ interface WelcomeScreenProps {
   onDelete: () => void;
   onGptKeySaved: () => void;
   onPerplexityKeySaved: () => void;
+  onGptKeyDeleted: () => void;
+  onPerplexityKeyDeleted: () => void;
 }
 
 const IconQuestionMark: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -57,6 +59,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onDelete,
   onGptKeySaved,
   onPerplexityKeySaved,
+  onGptKeyDeleted,
+  onPerplexityKeyDeleted,
 }) => {
   const isLoading = status === 'loading' || isActionLoading;
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
@@ -130,6 +134,17 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     } catch (e) {
       setChatGptKeyStatus('error');
       setChatGptKeyError(e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.');
+    }
+  };
+
+  const handleDeleteKey = async (model: 'chatgpt' | 'perplexity') => {
+    if (!window.confirm(`${model === 'chatgpt' ? 'ChatGPT' : 'Perplexity'} API 키를 삭제하시겠습니까?`)) return;
+    try {
+      if (model === 'chatgpt') { await deleteChatGptApiKey(); onGptKeyDeleted(); setChatGptKeyStatus('unsaved'); }
+      else { await deletePerplexityApiKey(); onPerplexityKeyDeleted(); setPerplexityKeyStatus('unsaved'); }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'API 키 삭제에 실패했습니다.';
+      if (model === 'chatgpt') setChatGptKeyError(message); else setPerplexityKeyError(message);
     }
   };
 
@@ -308,7 +323,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                 {perplexityKeyStatus === 'saved' ? (
                   <div className="flex items-center justify-between rounded-lg bg-slate-800 p-3">
                     <div className="flex items-center gap-2 text-green-400"><IconCheck className="h-5 w-5" /><span>API 키가 저장되었습니다.</span></div>
-                    <button onClick={() => { setPerplexityKeyStatus('editing'); setPerplexityApiKey(''); setPerplexityKeyError(null); }} className="rounded-md bg-slate-600 px-4 py-1 text-sm text-slate-300 hover:bg-slate-500">수정</button>
+                    <div className="flex gap-2"><button onClick={() => { setPerplexityKeyStatus('editing'); setPerplexityApiKey(''); setPerplexityKeyError(null); }} className="rounded-md bg-slate-600 px-4 py-1 text-sm text-slate-300 hover:bg-slate-500">수정</button><button onClick={() => handleDeleteKey('perplexity')} className="rounded-md bg-red-700 px-4 py-1 text-sm text-white hover:bg-red-600">삭제</button></div>
                   </div>
                 ) : (
                   <>
@@ -343,7 +358,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                 {chatGptKeyStatus === 'saved' ? (
                   <div className="flex items-center justify-between rounded-lg bg-slate-800 p-3">
                     <div className="flex items-center gap-2 text-green-400"><IconCheck className="h-5 w-5" /><span>API 키가 저장되었습니다.</span></div>
-                    <button onClick={() => { setChatGptKeyStatus('editing'); setChatGptApiKey(''); setChatGptKeyError(null); }} className="rounded-md bg-slate-600 px-4 py-1 text-sm text-slate-300 hover:bg-slate-500">수정</button>
+                    <div className="flex gap-2"><button onClick={() => { setChatGptKeyStatus('editing'); setChatGptApiKey(''); setChatGptKeyError(null); }} className="rounded-md bg-slate-600 px-4 py-1 text-sm text-slate-300 hover:bg-slate-500">수정</button><button onClick={() => handleDeleteKey('chatgpt')} className="rounded-md bg-red-700 px-4 py-1 text-sm text-white hover:bg-red-600">삭제</button></div>
                   </div>
                 ) : (
                   <>

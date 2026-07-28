@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 
 interface PrayerModalProps {
     isOpen: boolean;
@@ -10,6 +10,13 @@ interface PrayerModalProps {
 }
 
 const PrayerModal: React.FC<PrayerModalProps> = ({ isOpen, onClose, prayerText, topic, onConfirm, confirmButtonText }) => {
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleKeyDown = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onClose]);
+
     if (!isOpen) return null;
 
     const isError = prayerText.includes("실패했습니다");
@@ -20,6 +27,7 @@ const PrayerModal: React.FC<PrayerModalProps> = ({ isOpen, onClose, prayerText, 
             onClick={onClose}
             aria-modal="true"
             role="dialog"
+            aria-labelledby="prayer-modal-title"
         >
             <div
                 className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md flex flex-col border border-slate-700 animate-fade-in"
@@ -41,7 +49,7 @@ const PrayerModal: React.FC<PrayerModalProps> = ({ isOpen, onClose, prayerText, 
                                 </>
                            )}
                         </svg>
-                        <h2 className="text-2xl font-bold text-slate-100">
+                        <h2 id="prayer-modal-title" className="text-2xl font-bold text-slate-100">
                             {isError ? "알림" : `'${topic}' 말씀을 묵상하는 기도`}
                         </h2>
                     </div>

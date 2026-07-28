@@ -116,11 +116,12 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
 
     const originalWords = verseText.split(/\s+/);
 
-    const candidates = originalWords.map(word => {
+    const candidates = originalWords.map((word, wordIndex) => {
         const clean = stripPunctuation(word);
         return {
             original: word,
             clean,
+            wordIndex,
             score: scoreCandidate(clean),
         };
     });
@@ -139,26 +140,45 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
     // 3. Sort candidates by score (length + priority keyword bonus).
     eligibleWords.sort((a, b) => b.score - a.score);
 
-    // 4. Pick from the best-scoring candidates to add variety.
-    const selectionPool = eligibleWords.slice(0, Math.min(3, eligibleWords.length));
-    const chosenWord = selectionPool[Math.floor(Math.random() * selectionPool.length)];
+    // 4. Pick up to two distinct candidates from the highest-scoring pool.
+    // Keep randomness for variety, while preventing low-quality words from entering the pool.
+    const selectionPool = eligibleWords
+      .filter((candidate, candidateIndex, all) =>
+        all.findIndex(other => other.clean === candidate.clean) === candidateIndex
+      )
+      .slice(0, Math.min(3, eligibleWords.length));
+    const chosenWords = [...selectionPool]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, Math.min(2, selectionPool.length));
+    if (chosenWords.length === 0) continue;
 
-    const answerWord = chosenWord.original;
-    const answerIndex = verseText.indexOf(answerWord);
+    const parts: string[] = [];
+    let currentText = '';
+    const answers: string[] = [];
 
-    // This can fail if the same word appears multiple times and indexOf finds the wrong one,
-    // but for a fallback, it's an acceptable trade-off.
-    if (answerIndex === -1) continue;
+    originalWords.forEach((word, wordIndex) => {
+      const chosen = chosenWords.find(candidate => candidate.wordIndex === wordIndex);
+      if (!chosen) {
+        currentText += `${word}${wordIndex < originalWords.length - 1 ? ' ' : ''}`;
+        return;
+      }
 
-    const part1 = verseText.substring(0, answerIndex);
-    const part2 = verseText.substring(answerIndex + answerWord.length);
+      if (currentText) {
+        parts.push(currentText);
+        currentText = '';
+      }
+      parts.push('___');
+      answers.push(chosen.clean);
+      if (wordIndex < originalWords.length - 1) currentText = ' ';
+    });
+    if (currentText) parts.push(currentText);
 
     const question: FillInTheBlankQuestion = {
       type: QuestionType.FILL_IN_THE_BLANK,
       verseReference: finalVerseReference,
-      verseTextParts: [part1, '___', part2].filter(p => p !== ''),
-      // The answer should be the clean version without punctuation.
-      answers: [chosenWord.clean],
+      verseTextParts: parts,
+      // Answers are stored without trailing punctuation.
+      answers,
     };
     questions.push(question);
   }
@@ -169,6 +189,71 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
     topic: `${topic} (기본 퀴즈)`,
     questions,
   };
+};
+
+/**
+ * Validates the parts of an AI quiz that are required by the UI.
+ * Invalid questions must not reach QuizCard because they can render without
+ * answer inputs or compare against an answer that is not represented by a blank.
+ */
+export const isValidQuiz = (quiz: unknown, sourceText: string | null, topic?: string): quiz is Quiz => {
+  if (!quiz || typeof quiz !== 'object') return false;
+  const candidate = quiz as Partial<Quiz>;
+  if (typeof candidate.topic !== 'string' || !Array.isArray(candidate.questions) || candidate.questions.length === 0) {
+    return false;
+  }
+
+  const normalizedSource = normalizeText(sourceText || '');
+  const referencedVerses = new Set<string>();
+  const allQuestionsValid = candidate.questions.every((question) => {
+    if (!question || typeof question !== 'object') return false;
+    const q = question as unknown as Record<string, unknown>;
+    if (typeof q.verseReference !== 'string') return false;
+    const reference = parseReference(q.verseReference);
+    if (!reference || reference.verses.length !== 1) return false;
+    const verseKey = `${reference.book}:${reference.chapter}:${reference.verses[0]}`;
+    if (referencedVerses.has(verseKey)) return false;
+    referencedVerses.add(verseKey);
+
+    if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+      if (!Array.isArray(q.verseTextParts) || !Array.isArray(q.answers)) return false;
+      const parts = q.verseTextParts as unknown[];
+      const answers = q.answers as unknown[];
+      const blankCount = parts.filter(part => part === '___').length;
+      if (blankCount < 1 || blankCount > 3 || answers.length !== blankCount) return false;
+      if (parts.some(part => typeof part !== 'string') || answers.some(answer => typeof answer !== 'string' || !answer.trim())) return false;
+
+      // Every answer must come from the supplied passage, not model memory.
+      return (answers as string[]).every(answer => {
+        const normalizedAnswer = normalizeText(answer);
+        if (!normalizedSource.includes(normalizedAnswer)) return false;
+
+        // Reject answers made only of particles, endings, or other function words.
+        const answerWords = answer
+          .split(/\s+/)
+          .map(stripPunctuation)
+          .filter(Boolean);
+        return answerWords.some(isLikelyNoun);
+      });
+    }
+
+    if (q.type === QuestionType.QUESTION_ANSWER) {
+      return typeof q.question === 'string' && q.question.trim().length > 0
+        && typeof q.answer === 'string' && q.answer.trim().length > 0;
+    }
+
+    return false;
+  });
+
+  if (!allQuestionsValid) return false;
+  if (topic) {
+    const expectedReference = parseReference(topic);
+    if (!expectedReference || referencedVerses.size !== expectedReference.verses.length) return false;
+    return expectedReference.verses.every(verse =>
+      referencedVerses.has(`${expectedReference.book}:${expectedReference.chapter}:${verse}`)
+    );
+  }
+  return true;
 };
 
 /**

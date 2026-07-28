@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jt-bible-cache-v2';
+const CACHE_NAME = 'jt-bible-cache-v3';
 const BASE_URL = new URL(self.registration.scope).pathname;
 const urlsToCache = [
   BASE_URL,
@@ -16,6 +16,13 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const isStaticAsset = ['document', 'script', 'style', 'image', 'font'].includes(event.request.destination);
+  if (!isSameOrigin || !isStaticAsset) {
+    return;
+  }
+
   event.respondWith(
     caches.open(CACHE_NAME).then(cache =>
       cache.match(event.request).then(response => {
@@ -24,7 +31,7 @@ self.addEventListener('fetch', event => {
         }
 
         return fetch(event.request).then(networkResponse => {
-          if (networkResponse && networkResponse.ok && !event.request.url.includes('aistudiocdn.com')) {
+          if (networkResponse && networkResponse.ok) {
             cache.put(event.request, networkResponse.clone());
           }
 

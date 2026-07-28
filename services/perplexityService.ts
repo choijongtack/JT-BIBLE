@@ -1,9 +1,10 @@
-import type { ChatMessage } from '../types';
+import { getChatCompletionText, type ChatMessage, type ChatCompletionResponse } from '../types';
 import { supabase, supabaseUrl } from './supabaseClient';
 import { buildSystemInstruction } from './instructionTemplate';
 import { BIBLE_METADATA } from './bibleData';
 
-const PPLX_MODEL = 'llama-3-sonar-small-32k-online';
+// Use a currently supported Sonar model. The former Llama Sonar model was retired.
+const PPLX_MODEL = 'sonar-pro';
 const PROXY_URL = `${supabaseUrl}/functions/v1/perplexity-proxy`;
 
 const getAuthHeaders = async (): Promise<HeadersInit> => {
@@ -16,7 +17,7 @@ const getAuthHeaders = async (): Promise<HeadersInit> => {
     };
 };
 
-const callPerplexityProxy = async (endpoint: string, payload: object): Promise<any> => {
+const callPerplexityProxy = async (endpoint: string, payload: object): Promise<ChatCompletionResponse> => {
     let response: Response;
     try {
         const headers = await getAuthHeaders();
@@ -32,9 +33,9 @@ const callPerplexityProxy = async (endpoint: string, payload: object): Promise<a
         throw e;
     }
     
-    let data;
+    let data: ChatCompletionResponse;
     try {
-        data = await response.json();
+        data = await response.json() as ChatCompletionResponse;
     } catch {
         const errorText = await response.text();
         throw new Error(`Perplexity 프록시 오류: ${response.status} ${response.statusText}. 세부 정보: ${errorText.substring(0, 200)}`);
@@ -55,6 +56,10 @@ export const savePerplexityApiKey = async (apiKey: string): Promise<void> => {
 };
 
 
+export const deletePerplexityApiKey = async (): Promise<void> => {
+    await callPerplexityProxy('delete-perplexity-key', {});
+};
+
 export const getStudyTopicForBook = async (book: string): Promise<string> => {
     const prompt = `당신은 전문 신학자이고 법률학자이며 로스쿨 교수입니다. 저는 '${book}'을(를) 공부하기 시작하려고 합니다. 이 책의 시작 부분(1장 1절부터)을 분석하여, 첫 학습 세션에 적합한, 내용상 자연스럽게 구분되는 첫 번째 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 예를 들어, '에베소서'를 선택했다면 '에베소서 1:1-2' 또는 '에베소서 1:1-14'와 같이 제안할 수 있습니다. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
     
@@ -65,7 +70,7 @@ export const getStudyTopicForBook = async (book: string): Promise<string> => {
                 messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
             }
         });
-        const topic = data.choices[0].message.content.trim();
+        const topic = getChatCompletionText(data);
         if (!topic || !topic.includes(':')) {
             throw new Error('AI가 유효한 주제를 반환하지 않았습니다.');
         }
@@ -96,7 +101,7 @@ export const getNextStudyTopic = async (currentTopic: string, bookName: string):
             }
         });
 
-        const topic = data.choices[0].message.content.trim();
+        const topic = getChatCompletionText(data);
         if (!topic || !topic.includes(':')) {
             throw new Error('AI가 유효한 다음 주제를 반환하지 않았습니다.');
         }
@@ -117,7 +122,7 @@ export const continueLearningConversation = async (
         
         const data = await callPerplexityProxy('perplexity-completion', { payload: { model: PPLX_MODEL, messages: messagesWithNew } });
 
-        return data.choices[0].message.content;
+        return getChatCompletionText(data);
 
     } catch (error) {
         console.error("Error continuing conversation with Perplexity:", error);
@@ -143,7 +148,7 @@ export const generatePrayerForTopic = async (topic: string, mode: 'general' | 'a
                 messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
             }
         });
-        const prayer = data.choices[0].message.content.trim();
+        const prayer = getChatCompletionText(data);
         if (!prayer) {
             throw new Error('AI가 유효한 기도문을 반환하지 않았습니다.');
         }

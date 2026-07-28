@@ -6,7 +6,7 @@ import type { ChatMessage, Quiz, LearningSessionState } from '../types';
 // FIX: `QuestionType` is exported from `types.ts`, not `constants.ts`. Corrected the import path.
 import { LearningStep } from '../constants';
 import { QuestionType } from '../types';
-import { createFallbackQuiz, constructEnforcedPrompt, normalizeText } from '../services/learningSessionUtils';
+import { createFallbackQuiz, constructEnforcedPrompt, normalizeText, isValidQuiz } from '../services/learningSessionUtils';
 import { parseReference } from '../services/bibleUtils';
 import { buildSystemInstruction } from '../services/instructionTemplate';
 import { buildCalvinContextBlock, searchCalvinChunks } from '../services/calvinCitationService';
@@ -185,11 +185,11 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
                   }
               }
       
-              if (parsedQuiz.questions.length > 0) {
+              if (isValidQuiz(parsedQuiz, verseForQuiz, topic)) {
                   result.quizStarted = parsedQuiz;
                   cleanedText = displayText;
               } else {
-                  console.warn("AI generated 0 valid questions. Generating fallback quiz.");
+                  console.warn("AI generated an invalid quiz. Generating fallback quiz.");
                   const fallbackQuiz = createFallbackQuiz(topic, verseForQuiz);
                   if (fallbackQuiz) {
                       result.quizStarted = fallbackQuiz;

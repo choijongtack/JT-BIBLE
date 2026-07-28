@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../types';
+import { getChatCompletionText, type ChatMessage, type ChatCompletionResponse } from '../types';
 import { supabase, supabaseUrl } from './supabaseClient';
 import { buildSystemInstruction } from './instructionTemplate';
 import { BIBLE_METADATA } from './bibleData';
@@ -59,11 +59,11 @@ const getAuthHeaders = async (): Promise<HeadersInit> => {
  * @param payload The request body to be sent to the OpenAI API.
  * @returns The JSON response from the API.
  */
-const callChatGptCompletion = async (payload: any): Promise<any> => {
-    const preferredModel = payload.model || getChatGptModel();
+const callChatGptCompletion = async (payload: Record<string, unknown>): Promise<ChatCompletionResponse> => {
+    const preferredModel = typeof payload.model === 'string' ? payload.model : getChatGptModel();
     const modelOptions = getModelCandidateList(preferredModel);
 
-    const attemptRequest = async (payloadBody: object): Promise<any> => {
+    const attemptRequest = async (payloadBody: object): Promise<ChatCompletionResponse> => {
         let response: Response;
         try {
             const headers = await getAuthHeaders();
@@ -81,7 +81,7 @@ const callChatGptCompletion = async (payload: any): Promise<any> => {
 
         let data;
         try {
-            data = await response.json();
+            data = await response.json() as ChatCompletionResponse;
         } catch {
             const errorText = await response.text();
             throw new Error(`ChatGPT 프록시 오류: ${response.status} ${response.statusText}. 세부 정보: ${errorText.substring(0, 200)}`);
@@ -154,6 +154,12 @@ export const saveChatGptApiKey = async (apiKey: string): Promise<void> => {
 };
 
 
+export const deleteChatGptApiKey = async (): Promise<void> => {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${PROXY_URL}/delete-chatgpt-key`, { method: 'POST', headers });
+    if (!response.ok) throw new Error('ChatGPT API 키 삭제에 실패했습니다.');
+};
+
 export const getStudyTopicForBook = async (book: string): Promise<string> => {
     const prompt = `당신은 전문 신학자이고 법률학자이며 로스쿨 교수입니다. 저는 '${book}'을(를) 공부하기 시작하려고 합니다. 이 책의 시작 부분(1장 1절부터)을 분석하여, 첫 학습 세션에 적합한, 내용상 자연스럽게 구분되는 첫 번째 단락(pericope)을 추천해주세요. 응답은 오직 '성경책 이름 장:절-절' 형식으로만 제공해주세요. 예를 들어, '에베소서'를 선택했다면 '에베소서 1:1-2' 또는 '에베소서 1:1-14'와 같이 제안할 수 있습니다. 다른 어떤 설명이나 텍스트도 추가하지 마세요.`;
     
@@ -162,7 +168,7 @@ export const getStudyTopicForBook = async (book: string): Promise<string> => {
             model: getChatGptModel(),
             messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
         });
-        const topic = data.choices[0].message.content.trim();
+        const topic = getChatCompletionText(data);
         if (!topic || !topic.includes(':')) {
             throw new Error('AI가 유효한 주제를 반환하지 않았습니다.');
         }
@@ -191,7 +197,7 @@ export const getNextStudyTopic = async (currentTopic: string, bookName: string):
              messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
         });
 
-        const topic = data.choices[0].message.content.trim();
+        const topic = getChatCompletionText(data);
         if (!topic || !topic.includes(':')) {
             throw new Error('AI가 유효한 다음 주제를 반환하지 않았습니다.');
         }
@@ -212,7 +218,7 @@ export const continueLearningConversation = async (
         
         const data = await callChatGptCompletion({ model: getChatGptModel(), messages: messagesWithNew });
 
-        return data.choices[0].message.content;
+        return getChatCompletionText(data);
 
     } catch (error) {
         console.error("Error continuing conversation with ChatGPT:", error);
@@ -236,7 +242,7 @@ export const generatePrayerForTopic = async (topic: string, mode: 'general' | 'a
             model: getChatGptModel(),
             messages: [{ role: 'system', content: "You are a helpful assistant." }, { role: 'user', content: prompt }],
         });
-        const prayer = data.choices[0].message.content.trim();
+        const prayer = getChatCompletionText(data);
         if (!prayer) {
             throw new Error('AI가 유효한 기도문을 반환하지 않았습니다.');
         }

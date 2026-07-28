@@ -1,7 +1,7 @@
 // FIX: Imported `React` to resolve the 'Cannot find namespace React' error. The `React.SetStateAction` type requires the `React` namespace, which was not previously in scope.
 import React, { useState, useEffect, useCallback } from 'react';
 import type { AppStatus, Profile } from '../types';
-import { getProfile, createProfile, loginUser, registerUser, deleteUserAccount, logoutUser } from '../services/userDataService';
+import { getProfile, createProfile, loginUser, registerUser, deleteUserAccount, logoutUser, sendPasswordResetEmail, updatePassword } from '../services/userDataService';
 import { supabase } from '../services/supabaseClient';
 // FIX: Changed import from Session to AuthSession and aliased as Session. In some versions of supabase-js, the session type was exported as AuthSession.
 import type { AuthSession as Session } from '@supabase/supabase-js';
@@ -15,11 +15,18 @@ export const useProfileSession = () => {
     const [profile, setProfile] = useState<Profile | null>(null);
     const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
     const [authError, setAuthError] = useState<string | null>(null);
+    const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
     useEffect(() => {
         // FIX: Corrected to supabase.auth.onAuthStateChange() per Supabase JS v2 API.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
             setSession(session);
+
+            if (_event === 'PASSWORD_RECOVERY') {
+                setIsPasswordRecovery(true);
+                setAuthStatus('unauthenticated');
+                return;
+            }
 
             if (!session?.user) {
                 setProfile(null);
@@ -133,6 +140,14 @@ export const useProfileSession = () => {
             }
         }
     }, [logout]);
+
+    const requestPasswordReset = useCallback(async (email: string) => {
+        await sendPasswordResetEmail(email);
+    }, []);
+
+    const resetPassword = useCallback(async (password: string) => {
+        await updatePassword(password);
+    }, [logout]);
     
     // Allow App component to update profile state after progress saves
     const updateProfile = useCallback((newProfile: React.SetStateAction<Profile | null>) => {
@@ -150,5 +165,8 @@ export const useProfileSession = () => {
         deleteAccount,
         setProfile: updateProfile,
         setAuthError
+        ,isPasswordRecovery
+        ,requestPasswordReset
+        ,resetPassword
     };
 };

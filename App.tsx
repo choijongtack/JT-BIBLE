@@ -9,6 +9,7 @@ import WelcomeScreen from './components/WelcomeScreen';
 import ResultsScreen from './components/ResultsScreen';
 import AwaitingConfirmationScreen from './components/AwaitingConfirmationScreen';
 import ProfileErrorScreen from './components/ProfileErrorScreen';
+import PasswordResetScreen from './components/PasswordResetScreen';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
 import ProgressDebugPanel from './components/ProgressDebugPanel';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
@@ -37,6 +38,13 @@ interface BookCompletedModalProps {
 }
 
 const BookCompletedModal: React.FC<BookCompletedModalProps> = ({ isOpen, onClose, bookName }) => {
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleKeyDown = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onClose]);
+
     if (!isOpen || !bookName) return null;
 
     return (
@@ -45,13 +53,14 @@ const BookCompletedModal: React.FC<BookCompletedModalProps> = ({ isOpen, onClose
             onClick={onClose}
             aria-modal="true"
             role="dialog"
+            aria-labelledby="book-completed-title"
         >
             <div
                 className="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md flex flex-col border border-slate-700"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="p-6 sm:p-8 text-center">
-                    <h2 className="text-2xl font-bold text-slate-100 mb-4">학습 완료</h2>
+                    <h2 id="book-completed-title" className="text-2xl font-bold text-slate-100 mb-4">학습 완료</h2>
                     <p className="text-slate-300">
                         '{bookName}'의 학습을 모두 완료하셨습니다.
                         <br />
@@ -74,6 +83,13 @@ const BookCompletedModal: React.FC<BookCompletedModalProps> = ({ isOpen, onClose
 
 // --- State Management with useReducer ---
 
+type ProgressDebugInfo = {
+    before: Profile['progress'] | null;
+    request: Profile['progress'] | null;
+    after: Profile['progress'] | null;
+    error: string | null;
+};
+
 interface AppState {
     status: AppStatus;
     // FIX: Added the `isActionLoading` property to correctly type the application's state.
@@ -90,12 +106,7 @@ interface AppState {
         isOpen: boolean;
         bookName: string | null;
     };
-    progressDebugInfo: {
-        before: Profile['progress'] | null;
-        request: Profile['progress'] | null;
-        after: Profile['progress'] | null;
-        error: string | null;
-    } | null;
+    progressDebugInfo: ProgressDebugInfo | null;
 }
 
 type AppAction =
@@ -106,8 +117,8 @@ type AppAction =
     | { type: 'SET_ERROR'; payload: string | null }
     | { type: 'START_LEARNING'; payload: LearningSessionState }
     | { type: 'UPDATE_LEARNING_STATE'; payload: LearningSessionState }
-    | { type: 'FINISH_LEARNING'; payload: { debugInfo: any } }
-    | { type: 'SAVE_AND_EXIT'; payload: { topic: string; debugInfo: any } }
+    | { type: 'FINISH_LEARNING'; payload: { debugInfo: ProgressDebugInfo } }
+    | { type: 'SAVE_AND_EXIT'; payload: { topic: string; debugInfo: ProgressDebugInfo } }
     | { type: 'GO_TO_IDLE' }
     | { type: 'OPEN_DELETE_MODAL' }
     | { type: 'CLOSE_DELETE_MODAL' }
@@ -221,6 +232,9 @@ const App: React.FC = () => {
         deleteAccount,
         setProfile,
         setAuthError
+        ,isPasswordRecovery
+        ,requestPasswordReset
+        ,resetPassword
     } = useProfileSession();
 
     useEffect(() => {
@@ -586,10 +600,12 @@ const App: React.FC = () => {
                         onDelete={() => dispatch({ type: 'OPEN_DELETE_MODAL' })}
                         onGptKeySaved={handleGptKeySaved}
                         onPerplexityKeySaved={handlePerplexityKeySaved}
+                        onGptKeyDeleted={() => setProfile(prev => prev ? { ...prev, chatgpt_api_key: undefined } : null)}
+                        onPerplexityKeyDeleted={() => setProfile(prev => prev ? { ...prev, perplexity_api_key: undefined } : null)}
                     />
                 );
             case 'login':
-                return <LoginScreen onLogin={login} onRegister={register} error={authError} />;
+                return isPasswordRecovery ? <PasswordResetScreen onSubmit={resetPassword} onBack={() => window.location.reload()} /> : <LoginScreen onLogin={login} onRegister={register} onResetPassword={requestPasswordReset} error={authError} />;
             case 'awaiting-confirmation':
                 return <AwaitingConfirmationScreen onBackToLogin={() => dispatch({ type: 'SET_AUTH_STATUS', payload: 'login' })} />;
             case 'profile_error':

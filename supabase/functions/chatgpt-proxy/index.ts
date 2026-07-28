@@ -125,6 +125,17 @@ serve(async (req) => {
     }
 
     // ChatGPT API 호출 엔드포인트 (/chatgpt-completion)
+    else if (url.pathname.endsWith("/delete-chatgpt-key")) {
+      if (req.method !== "POST") throw new Error("API 키 삭제는 POST 요청만 허용됩니다.");
+      const { data, error } = await supabaseClient.from("profiles")
+        .update({ chatgpt_api_key: null, updated_at: new Date().toISOString() })
+        .eq("id", user.id)
+        .select("id")
+        .single();
+      if (error) throw error;
+      if (!data) throw new Error("사용자 프로필을 찾을 수 없습니다.");
+      return new Response(JSON.stringify({ message: "ChatGPT API 키가 삭제되었습니다." }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+    }
     else if (url.pathname.endsWith("/chatgpt-completion")) {
       const completionPayload = await req.json();
       if (!completionPayload || !completionPayload.messages || !Array.isArray(completionPayload.messages)) {

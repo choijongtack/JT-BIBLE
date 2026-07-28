@@ -400,7 +400,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
               <h2 className="hidden sm:block text-xl font-bold text-slate-100 truncate" title={topic}>{topic}</h2>
               <p className="text-xs text-blue-400 mt-1">
                   AI 모델: {AI_MODEL_DISPLAY_NAMES[aiModel]} ({mode === 'general' ? '일반 학습' : '심화 학습'})
-                  <span className="font-semibold text-slate-300"> ??{currentStep}</span>
+                  <span className="font-semibold text-slate-300"> · {currentStep}</span>
               </p>
             </div>
             
@@ -424,6 +424,10 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
                 </div>
               )}
             </div>
+          </div>
+
+          <div className="sm:hidden px-4 py-3 border-b border-slate-700 overflow-x-auto">
+            <ProgressTracker currentStep={currentStep} mode={mode} />
           </div>
           
           {/* Desktop Progress Tracker */}

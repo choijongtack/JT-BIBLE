@@ -16,7 +16,8 @@ const corsHeaders = {
 };
 
 const PPLX_API_URL = "https://api.perplexity.ai/chat/completions";
-const PPLX_TEST_MODEL = 'llama-3-sonar-small-32k-online';
+// Use a currently supported model for API-key validation.
+const PPLX_TEST_MODEL = 'sonar-pro';
 const ENC_SECRET = Deno.env.get("ENCRYPTION_SECRET");
 
 if (!ENC_SECRET) {
@@ -150,6 +151,17 @@ serve(async (req) => {
     }
     
     // 엔드포인트: /perplexity-completion (메인 프록시)
+    else if (url.pathname.endsWith("/delete-perplexity-key")) {
+      if (req.method !== "POST") throw new Error("API 키 삭제는 POST 요청만 허용됩니다.");
+      const { data, error } = await supabaseClient.from("profiles")
+        .update({ perplexity_api_key: null, updated_at: new Date().toISOString() })
+        .eq("id", user.id)
+        .select("id")
+        .single();
+      if (error) throw error;
+      if (!data) throw new Error("사용자 프로필을 찾을 수 없습니다.");
+      return new Response(JSON.stringify({ message: "Perplexity API 키가 삭제되었습니다." }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 });
+    }
     else if (url.pathname.endsWith("/perplexity-completion")) {
         const { payload: completionPayload } = await req.json();
         if (!completionPayload || !completionPayload.messages || !Array.isArray(completionPayload.messages)) {

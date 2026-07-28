@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bible-study-cache-v1';
+const CACHE_NAME = 'bible-study-cache-v2';
 // 앱 셸에 필요한 가장 중요한 URL을 캐시합니다.
 const urlsToCache = [
   '/',
@@ -21,6 +21,13 @@ self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') {
     return;
   }
+
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const isStaticAsset = ['document', 'script', 'style', 'image', 'font'].includes(event.request.destination);
+  if (!isSameOrigin || !isStaticAsset) {
+    return;
+  }
   
   event.respondWith(
     caches.open(CACHE_NAME).then(cache => {
@@ -35,9 +42,7 @@ self.addEventListener('fetch', event => {
           // 응답이 유효하면 캐시합니다.
           if (networkResponse && networkResponse.ok) {
             // CDN에서 오는 불투명한 응답은 캐시하지 않습니다.
-            if (!event.request.url.includes('aistudiocdn.com')) {
-                 cache.put(event.request, networkResponse.clone());
-            }
+            cache.put(event.request, networkResponse.clone());
           }
           return networkResponse;
         });

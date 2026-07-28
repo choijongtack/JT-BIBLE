@@ -37,6 +37,26 @@ export type ChatMessage = {
 
 export type AiModel = 'gemini' | 'perplexity' | 'chatgpt';
 
+export interface ChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  error?: {
+    message?: string;
+  };
+}
+
+export const getChatCompletionText = (data: unknown): string => {
+  const response = data as ChatCompletionResponse;
+  const content = response.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('AI 응답에서 텍스트를 찾을 수 없습니다.');
+  }
+  return content.trim();
+};
+
 export interface LearningSessionState {
   topic: string;
   currentStep: LearningStep;
