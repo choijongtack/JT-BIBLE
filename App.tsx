@@ -15,7 +15,7 @@ import ProgressDebugPanel from './components/ProgressDebugPanel';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic } from './services/chatgptService';
-import { updateUserProgress } from './services/userDataService';
+import { saveCompletedPassage, updateUserProgress } from './services/userDataService';
 import type { BookProgress, AiModel } from './types';
 import { getBibleVerse, getLastVerseInChapter, countVersesUpTo } from './services/bibleService';
 import { useProfileSession } from './hooks/useProfileSession';
@@ -502,6 +502,18 @@ const App: React.FC = () => {
         }
 
         setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
+
+        const passageStartVerse = parsedTopic.verses[0];
+        const passageResult = await saveCompletedPassage({
+            book: parsedTopic.book,
+            chapter: parsedTopic.chapter,
+            startVerse: passageStartVerse,
+            endVerse: newMarker.verse,
+        });
+        if (passageResult.error) {
+            console.warn('완료 구간 별도 저장에 실패했습니다. 기존 진행도 저장은 완료되었습니다.', passageResult.error);
+        }
+
         dispatch({ type: 'FINISH_LEARNING', payload: { debugInfo: result } });
 
     }, [activeSession, profile, setProfile]);

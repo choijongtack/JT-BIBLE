@@ -40,6 +40,32 @@ export interface ProgressDebugInfo {
   error: string | null;
 }
 
+export interface CompletedPassage {
+  book: string;
+  chapter: number;
+  startVerse: number;
+  endVerse: number;
+}
+
+export const saveCompletedPassage = async (passage: CompletedPassage): Promise<{ error: string | null }> => {
+  try {
+    const session = await getValidSession();
+    const { error } = await supabase
+      .from('completed_passages')
+      .upsert({
+        user_id: session.user.id,
+        book: passage.book,
+        chapter: passage.chapter,
+        start_verse: passage.startVerse,
+        end_verse: passage.endVerse,
+      }, { onConflict: 'user_id,book,chapter,start_verse,end_verse' });
+
+    return { error: error?.message ?? null };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
 // ---------------- 인증/계정 ----------------
 export const registerUser = async (email: string, password: string) => {
   // FIX: Corrected to supabase.auth.signUp() per Supabase JS v2 API.
