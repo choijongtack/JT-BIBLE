@@ -176,7 +176,7 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
                               if (!questionRef || sessionRef.book !== questionRef.book || sessionRef.chapter !== questionRef.chapter) return false;
                               if (!questionRef.verses.every(v => sessionRef.verses.includes(v))) return false;
                               if (q.type === QuestionType.FILL_IN_THE_BLANK) {
-                                  const verseStringFromParts = q.verseTextParts.join('').replace(/___/g, '');
+                                  const verseStringFromParts = q.verseTextParts.join('').replace(/___/g, q.answers[0] || '');
                                   if (!normalizeText(verseForQuiz).includes(normalizeText(verseStringFromParts))) return false;
                               }
                               return true;

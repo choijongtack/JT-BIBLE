@@ -15,7 +15,7 @@ import ProgressDebugPanel from './components/ProgressDebugPanel';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic } from './services/chatgptService';
-import { getCompletedPassages, getStudySession, saveCompletedPassage, saveStudySession, updateUserProgress } from './services/userDataService';
+import { completeStudySession, getCompletedPassages, getStudySession, saveStudySession, updateUserProgress } from './services/userDataService';
 import type { CompletedPassage } from './services/userDataService';
 import type { BookProgress, AiModel } from './types';
 import { getBibleVerse, getLastVerseInChapter, countVersesUpTo } from './services/bibleService';
@@ -499,19 +499,27 @@ const App: React.FC = () => {
             currentQuestionIndex: 0,
             score: 0,
         };
-        const sessionTableResult = await saveStudySession(book, sessionToSave);
-        if (sessionTableResult.error) {
-            console.warn('완료 세션 별도 저장에 실패했습니다. 기존 진행도 저장은 완료되었습니다.', sessionTableResult.error);
-        }
-
         const newBookProgress: BookProgress = { 
             lastSession: sessionToSave, 
             completionMarker: newMarker, 
             totalCompletedVerses: count 
         };
-        const result = await updateUserProgress(book, newBookProgress);
+        const result = await completeStudySession({
+            book,
+            bookProgress: newBookProgress,
+            topic,
+            mode,
+            aiModel,
+            currentStep: sessionToSave.currentStep,
+            passage: {
+                book: parsedTopic.book,
+                chapter: parsedTopic.chapter,
+                startVerse: parsedTopic.verses[0],
+                endVerse: newMarker.verse,
+            },
+        });
 
-        if (result.error || !result.after) {
+        if (result.error) {
             // 💡 [수정]: 오류 발생 시 로딩 상태를 명시적으로 해제합니다.
             // FIX: Removed redundant `STOP_FEATURE_LOADING` dispatch.
             // The `SET_ERROR` action already handles resetting the loading state.
@@ -519,18 +527,7 @@ const App: React.FC = () => {
             return;
         }
 
-        setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
-
-        const passageStartVerse = parsedTopic.verses[0];
-        const passageResult = await saveCompletedPassage({
-            book: parsedTopic.book,
-            chapter: parsedTopic.chapter,
-            startVerse: passageStartVerse,
-            endVerse: newMarker.verse,
-        });
-        if (passageResult.error) {
-            console.warn('완료 구간 별도 저장에 실패했습니다. 기존 진행도 저장은 완료되었습니다.', passageResult.error);
-        }
+        setProfile(prev => prev ? { ...prev, progress: { ...prev.progress, [book]: newBookProgress } } : null);
         const refreshedPassages = await getCompletedPassages();
         if (refreshedPassages) setCompletedPassages(refreshedPassages);
 

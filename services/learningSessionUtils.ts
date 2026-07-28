@@ -220,13 +220,20 @@ export const isValidQuiz = (quiz: unknown, sourceText: string | null, topic?: st
       const parts = q.verseTextParts as unknown[];
       const answers = q.answers as unknown[];
       const blankCount = parts.filter(part => part === '___').length;
-      if (blankCount < 1 || blankCount > 3 || answers.length !== blankCount) return false;
+      if (blankCount !== 1 || answers.length !== 1) return false;
       if (parts.some(part => typeof part !== 'string') || answers.some(answer => typeof answer !== 'string' || !answer.trim())) return false;
 
       // Every answer must come from the supplied passage, not model memory.
       return (answers as string[]).every(answer => {
         const normalizedAnswer = normalizeText(answer);
         if (!normalizedSource.includes(normalizedAnswer)) return false;
+
+        // Do not accept a noun with a Korean case/topic particle attached.
+        if (/(은|는|이|가|을|를|에|에게|에서|으로|로|와|과|의|도|만)$/.test(answer.trim())) return false;
+
+        // Replacing the single blank with its answer must reproduce text from the source.
+        const reconstructed = (parts as string[]).map(part => part === '___' ? answer : part).join('');
+        if (!normalizedSource.includes(normalizeText(reconstructed))) return false;
 
         // Reject answers made only of particles, endings, or other function words.
         const answerWords = answer

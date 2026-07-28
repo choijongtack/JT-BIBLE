@@ -86,6 +86,35 @@ export const saveCompletedPassage = async (passage: CompletedPassage): Promise<{
   }
 };
 
+export const completeStudySession = async (params: {
+  book: string;
+  bookProgress: BookProgress;
+  topic: string;
+  mode: 'general' | 'advanced';
+  aiModel: 'gemini' | 'perplexity' | 'chatgpt';
+  currentStep: LearningStep;
+  passage: CompletedPassage;
+}): Promise<{ error: string | null }> => {
+  try {
+    await getValidSession();
+    const { error } = await supabase.rpc('complete_study_session', {
+      p_book: params.book,
+      p_book_progress: params.bookProgress,
+      p_topic: params.topic,
+      p_mode: params.mode,
+      p_ai_model: params.aiModel,
+      p_current_step: params.currentStep,
+      p_passage_book: params.passage.book,
+      p_chapter: params.passage.chapter,
+      p_start_verse: params.passage.startVerse,
+      p_end_verse: params.passage.endVerse,
+    });
+    return { error: error?.message ?? null };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
 export const getStudySession = async (book: string): Promise<LearningSessionState | null> => {
   try {
     await getValidSession();
