@@ -1,4 +1,5 @@
 import type { UserProgress } from '../types';
+import type { CompletedPassage } from './userDataService';
 import { OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS } from '../constants';
 
 export interface BookData {
@@ -55,6 +56,7 @@ export const BIBLE_BOOK_DATA: Record<string, BookData> = Object.fromEntries([
 export const calculateVerseProgressForList = (
   progress: UserProgress | null | undefined,
   books: string[],
+  completedPassages?: CompletedPassage[] | null,
 ): { completed: number; total: number } => {
   let completedVerses = 0;
   let totalVerses = 0;
@@ -64,6 +66,17 @@ export const calculateVerseProgressForList = (
       totalVerses += BIBLE_BOOK_DATA[bookName].totalVerses;
     }
   });
+
+  if (completedPassages) {
+    const coveredVerses = new Set<string>();
+    completedPassages.forEach(passage => {
+      if (!books.includes(passage.book)) return;
+      for (let verse = passage.startVerse; verse <= passage.endVerse; verse += 1) {
+        coveredVerses.add(`${passage.book}:${passage.chapter}:${verse}`);
+      }
+    });
+    return { completed: coveredVerses.size, total: totalVerses };
+  }
 
   if (!progress) {
     return { completed: 0, total: totalVerses };

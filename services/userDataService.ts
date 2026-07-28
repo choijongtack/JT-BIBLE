@@ -47,6 +47,26 @@ export interface CompletedPassage {
   endVerse: number;
 }
 
+export const getCompletedPassages = async (): Promise<CompletedPassage[] | null> => {
+  try {
+    await getValidSession();
+    const { data, error } = await supabase
+      .from('completed_passages')
+      .select('book, chapter, start_verse, end_verse')
+      .order('completed_at', { ascending: true });
+    if (error) throw error;
+    return (data ?? []).map(row => ({
+      book: row.book,
+      chapter: row.chapter,
+      startVerse: row.start_verse,
+      endVerse: row.end_verse,
+    }));
+  } catch (error) {
+    console.warn('완료 구간 조회에 실패했습니다. 기존 JSONB 진행률을 사용합니다.', error);
+    return null;
+  }
+};
+
 export const saveCompletedPassage = async (passage: CompletedPassage): Promise<{ error: string | null }> => {
   try {
     const session = await getValidSession();
@@ -60,6 +80,58 @@ export const saveCompletedPassage = async (passage: CompletedPassage): Promise<{
         end_verse: passage.endVerse,
       }, { onConflict: 'user_id,book,chapter,start_verse,end_verse' });
 
+    return { error: error?.message ?? null };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
+export const getStudySession = async (book: string): Promise<LearningSessionState | null> => {
+  try {
+    await getValidSession();
+    const { data, error } = await supabase
+      .from('study_sessions')
+      .select('topic, mode, ai_model, current_step, messages, bible_verse, score, quiz_data, current_question_index, is_complete')
+      .eq('book', book)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    return {
+      topic: data.topic,
+      mode: data.mode,
+      aiModel: data.ai_model,
+      currentStep: data.current_step as LearningStep,
+      messages: data.messages ?? [],
+      bibleVerse: data.bible_verse,
+      score: data.score ?? 0,
+      quizData: data.quiz_data,
+      currentQuestionIndex: data.current_question_index ?? 0,
+      isComplete: data.is_complete,
+    };
+  } catch (error) {
+    console.warn('별도 학습 세션 조회에 실패했습니다. 기존 progress를 사용합니다.', error);
+    return null;
+  }
+};
+
+export const saveStudySession = async (book: string, sessionState: LearningSessionState): Promise<{ error: string | null }> => {
+  try {
+    const session = await getValidSession();
+    const { error } = await supabase.from('study_sessions').upsert({
+      user_id: session.user.id,
+      book,
+      topic: sessionState.topic,
+      mode: sessionState.mode,
+      ai_model: sessionState.aiModel,
+      current_step: sessionState.currentStep,
+      messages: sessionState.messages,
+      bible_verse: sessionState.bibleVerse,
+      score: sessionState.score,
+      quiz_data: sessionState.quizData,
+      current_question_index: sessionState.currentQuestionIndex,
+      is_complete: sessionState.isComplete ?? false,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,book' });
     return { error: error?.message ?? null };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };

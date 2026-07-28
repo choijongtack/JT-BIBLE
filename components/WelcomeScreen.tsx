@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { AiModel, AppStatus, Profile } from '../types';
+import type { CompletedPassage } from '../services/userDataService';
 import { IconCheck, IconLoader, NEW_TESTAMENT_BOOKS, OLD_TESTAMENT_BOOKS } from '../constants';
 import { calculateVerseProgressForList, BIBLE_METADATA } from '../services/bibleData';
 import { parseReference } from '../services/bibleUtils';
@@ -16,6 +17,7 @@ interface WelcomeScreenProps {
   isActionLoading: boolean;
   onStart: (book: string, aiModel: AiModel, mode?: 'general' | 'advanced', customTopic?: string) => void;
   profile: Profile | null;
+  completedPassages: CompletedPassage[] | null;
   onLogout: () => void;
   onDelete: () => void;
   onGptKeySaved: () => void;
@@ -55,6 +57,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   isActionLoading,
   onStart,
   profile,
+  completedPassages,
   onLogout,
   onDelete,
   onGptKeySaved,
@@ -242,9 +245,9 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     );
   };
 
-  const totalProgress = calculateVerseProgressForList(profile?.progress, [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS]);
-  const otProgress = calculateVerseProgressForList(profile?.progress, OLD_TESTAMENT_BOOKS);
-  const ntProgress = calculateVerseProgressForList(profile?.progress, NEW_TESTAMENT_BOOKS);
+  const totalProgress = calculateVerseProgressForList(profile?.progress, [...OLD_TESTAMENT_BOOKS, ...NEW_TESTAMENT_BOOKS], completedPassages);
+  const otProgress = calculateVerseProgressForList(profile?.progress, OLD_TESTAMENT_BOOKS, completedPassages);
+  const ntProgress = calculateVerseProgressForList(profile?.progress, NEW_TESTAMENT_BOOKS, completedPassages);
   const bookLastTopic = profile?.progress?.[selectedStartBook || '']?.lastSession?.topic;
 
   return (

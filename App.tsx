@@ -1,4 +1,4 @@
-import React, { useReducer, useCallback, useEffect } from 'react';
+import React, { useReducer, useCallback, useEffect, useState } from 'react';
 import type { AppStatus, LearningSessionState, Profile, Quiz, CompletionMarker } from './types';
 import { LearningStep, OLD_TESTAMENT_BOOKS, NEW_TESTAMENT_BOOKS } from './constants';
 import { BIBLE_METADATA } from './services/bibleData';
@@ -15,7 +15,8 @@ import ProgressDebugPanel from './components/ProgressDebugPanel';
 import { getStudyTopicForBook as getGeminiStudyTopic, getNextStudyTopic as getNextGeminiStudyTopic } from './services/geminiService';
 import { getStudyTopicForBook as getPerplexityStudyTopic, getNextStudyTopic as getNextPerplexityStudyTopic } from './services/perplexityService';
 import { getStudyTopicForBook as getChatGptStudyTopic, getNextStudyTopic as getNextChatGptStudyTopic } from './services/chatgptService';
-import { saveCompletedPassage, updateUserProgress } from './services/userDataService';
+import { getCompletedPassages, getStudySession, saveCompletedPassage, saveStudySession, updateUserProgress } from './services/userDataService';
+import type { CompletedPassage } from './services/userDataService';
 import type { BookProgress, AiModel } from './types';
 import { getBibleVerse, getLastVerseInChapter, countVersesUpTo } from './services/bibleService';
 import { useProfileSession } from './hooks/useProfileSession';
@@ -219,6 +220,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
 
 const App: React.FC = () => {
     const [state, dispatch] = useReducer(appReducer, initialState);
+    const [completedPassages, setCompletedPassages] = useState<CompletedPassage[] | null>(null);
     const { status, activeSession, lastSessionResult, error, loadingMessage, isDeleteConfirmOpen, completedBookModal, progressDebugInfo } = state;
 
     const {
@@ -252,6 +254,14 @@ const App: React.FC = () => {
             dispatch({ type: 'SET_AUTH_STATUS', payload: authStatus });
         }
     }, [authStatus, profile, status]);
+
+    useEffect(() => {
+        if (authStatus !== 'authenticated') {
+            setCompletedPassages(null);
+            return;
+        }
+        getCompletedPassages().then(setCompletedPassages);
+    }, [authStatus]);
 
 
     const resumeLearningSession = useCallback((sessionToResume: LearningSessionState, mode?: 'general' | 'advanced') => {
@@ -409,7 +419,8 @@ const App: React.FC = () => {
         dispatch({ type: 'START_FEATURE_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
     
         const savedBookProgress = currentProfile?.progress?.[book];
-        let savedSession = savedBookProgress?.lastSession;
+        const sessionTableValue = await getStudySession(book);
+        let savedSession = sessionTableValue ?? savedBookProgress?.lastSession;
     
         if (savedSession && (typeof savedSession.topic !== 'string' || !savedSession.topic)) {
             savedSession = undefined;
@@ -488,6 +499,10 @@ const App: React.FC = () => {
             currentQuestionIndex: 0,
             score: 0,
         };
+        const sessionTableResult = await saveStudySession(book, sessionToSave);
+        if (sessionTableResult.error) {
+            console.warn('완료 세션 별도 저장에 실패했습니다. 기존 진행도 저장은 완료되었습니다.', sessionTableResult.error);
+        }
 
         const newBookProgress: BookProgress = { 
             lastSession: sessionToSave, 
@@ -516,6 +531,8 @@ const App: React.FC = () => {
         if (passageResult.error) {
             console.warn('완료 구간 별도 저장에 실패했습니다. 기존 진행도 저장은 완료되었습니다.', passageResult.error);
         }
+        const refreshedPassages = await getCompletedPassages();
+        if (refreshedPassages) setCompletedPassages(refreshedPassages);
 
         dispatch({ type: 'FINISH_LEARNING', payload: { debugInfo: result } });
 
@@ -543,6 +560,11 @@ const App: React.FC = () => {
         }
 
         setProfile(prev => prev ? { ...prev, progress: result.after! } : null);
+
+        const sessionTableResult = await saveStudySession(book, sessionToSave);
+        if (sessionTableResult.error) {
+            console.warn('진행 중 세션 별도 저장에 실패했습니다. 기존 진행도 저장은 완료되었습니다.', sessionTableResult.error);
+        }
 
         if (isSystemBack) {
             dispatch({ type: 'GO_TO_IDLE' });
@@ -611,6 +633,7 @@ const App: React.FC = () => {
                         isActionLoading={state.isActionLoading} 
                         onStart={handleStartLearning}
                         profile={profile}
+                        completedPassages={completedPassages}
                         onLogout={logout}
                         onDelete={() => dispatch({ type: 'OPEN_DELETE_MODAL' })}
                         onGptKeySaved={handleGptKeySaved}
