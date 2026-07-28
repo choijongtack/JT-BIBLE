@@ -9,7 +9,7 @@ declare var Deno: {
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Base64 인코딩/디코딩을 위해 Deno 표준 라이브러리를 사용합니다.
-import { encode as base64Encode, decode as base64Decode } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { encodeBase64 as base64Encode, decodeBase64 as base64Decode } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 // CORS 헤더를 상수로 정의하여 재사용성을 높입니다.
 const corsHeaders = {

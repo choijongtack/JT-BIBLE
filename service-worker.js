@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bible-study-cache-v2';
+const CACHE_NAME = 'bible-study-cache-v3';
 // 앱 셸에 필요한 가장 중요한 URL을 캐시합니다.
 const urlsToCache = [
   '/',
