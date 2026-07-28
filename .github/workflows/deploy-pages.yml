@@ -31,8 +31,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Build
         run: npm run build
+
+      - name: Ensure static files are included
+        run: |
+          cp public/site.webmanifest dist/site.webmanifest
+          cp public/service-worker.js dist/service-worker.js
+          test -f dist/index.html
+          test -f dist/site.webmanifest
+          test -f dist/service-worker.js
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
