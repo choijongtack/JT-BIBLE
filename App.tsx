@@ -235,6 +235,7 @@ const App: React.FC = () => {
         ,isPasswordRecovery
         ,requestPasswordReset
         ,resetPassword
+        ,refreshProfile
     } = useProfileSession();
 
     useEffect(() => {
@@ -369,6 +370,8 @@ const App: React.FC = () => {
     }, [profile]);
 
     const handleStartLearning = useCallback(async (book: string, aiModel?: AiModel, mode?: 'general' | 'advanced', customTopic?: string) => {
+        const latestProfile = await refreshProfile();
+        const currentProfile = latestProfile ?? profile;
         const normalizedCustomTopic = customTopic?.trim();
         if (normalizedCustomTopic) {
             const parsedCustomTopic = parseReference(normalizedCustomTopic);
@@ -378,7 +381,7 @@ const App: React.FC = () => {
             }
 
             const customBook = parsedCustomTopic.book;
-            const savedCustomBookSession = profile?.progress?.[customBook]?.lastSession;
+            const savedCustomBookSession = currentProfile?.progress?.[customBook]?.lastSession;
             const finalAiModel = aiModel ?? savedCustomBookSession?.aiModel ?? 'gemini';
             const finalMode = mode ?? savedCustomBookSession?.mode ?? 'general';
 
@@ -405,7 +408,7 @@ const App: React.FC = () => {
         }
         dispatch({ type: 'START_FEATURE_LOADING', payload: `'${book}' 학습을 준비하는 중...` });
     
-        const savedBookProgress = profile?.progress?.[book];
+        const savedBookProgress = currentProfile?.progress?.[book];
         let savedSession = savedBookProgress?.lastSession;
     
         if (savedSession && (typeof savedSession.topic !== 'string' || !savedSession.topic)) {
@@ -433,7 +436,7 @@ const App: React.FC = () => {
             const finalMode = mode ?? savedSession?.mode ?? 'general';
             await startNewLearningSession(book, finalAiModel, finalMode);
         }
-    }, [profile, resumeLearningSession, startNewLearningSession]);
+    }, [profile, refreshProfile, resumeLearningSession, startNewLearningSession]);
 
     const handleFinishLearning = useCallback(async () => {
         if (!activeSession || !profile || !activeSession.topic) {

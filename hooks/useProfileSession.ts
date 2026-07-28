@@ -154,6 +154,17 @@ export const useProfileSession = () => {
         setProfile(newProfile);
     }, []);
 
+    const refreshProfile = useCallback(async (): Promise<Profile | null> => {
+        try {
+            const latestProfile = await getProfile();
+            if (latestProfile) setProfile(latestProfile);
+            return latestProfile;
+        } catch (error) {
+            console.warn('최신 프로필을 불러오지 못했습니다. 현재 프로필을 사용합니다.', error);
+            return null;
+        }
+    }, []);
+
     return {
         session,
         profile,
@@ -168,5 +179,6 @@ export const useProfileSession = () => {
         ,isPasswordRecovery
         ,requestPasswordReset
         ,resetPassword
+        ,refreshProfile
     };
 };
