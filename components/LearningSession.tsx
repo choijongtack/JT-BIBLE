@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Quiz, ChatMessage, LearningSessionState } from '../types';
+import { normalizeSavedQuiz } from '../services/learningSessionUtils';
 import { LearningStep } from '../constants';
 import { QuestionType } from '../types';
 import QuizCard from './QuizCard';
@@ -42,7 +43,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
   const [userInput, setUserInput] = useState('');
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
 
-  const [quizData, setQuizData] = useState<Quiz | null>(savedSession.quizData);
+  const [quizData, setQuizData] = useState<Quiz | null>(() => normalizeSavedQuiz(savedSession.quizData));
   const [isQuizUiActive, setIsQuizUiActive] = useState<boolean>(Boolean(savedSession.quizData) && !(savedSession.isComplete ?? false));
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(savedSession.currentQuestionIndex);
   const [score, setScore] = useState(savedSession.score);

@@ -9,6 +9,21 @@ const stripPunctuation = (word: string) =>
     word.replace(/[.,;?!:'"()\[\]{}—–\-]/g, ''); // '-' 추가 및 기타 특수문자 정리
 
 // 문장 성분에 영향을 주지 않는 조사, 연결어미, 보조사, 감탄사 등
+const KOREAN_PARTICLE_SUFFIXES = [
+  '으로부터', '으로써', '으로서', '에게서', '에게로', '한테서', '에서', '에게', '한테', '으로', '처럼', '만큼',
+  '부터', '까지', '보다', '조차', '마저', '이랑', '랑', '이며', '며', '이나', '나',
+  '은', '는', '이', '가', '을', '를', '에', '와', '과', '의', '도', '만', '로',
+];
+
+const splitKoreanParticle = (word: string): { answer: string; particle: string } => {
+  const punctuationMatch = word.match(/[.,;?!:'"()\[\]{}?-]+$/);
+  const punctuation = punctuationMatch?.[0] || '';
+  const core = punctuation ? word.slice(0, -punctuation.length) : word;
+  const suffix = KOREAN_PARTICLE_SUFFIXES.find(candidate => core.endsWith(candidate));
+  if (!suffix || core.length - suffix.length < 2) return { answer: core, particle: punctuation };
+  return { answer: core.slice(0, -suffix.length), particle: suffix + punctuation };
+};
+
 const KOREAN_STOP_WORDS: string[] = [
     // 격 조사
     '이', '가', '을', '를', '은', '는', '도', '만', '께서', '에서', '에게', '와', '과', '의', 
@@ -24,6 +39,16 @@ const KOREAN_STOP_WORDS: string[] = [
     
     // ~이다, ~하다의 어간
     '이다', '하다',
+];
+
+// Biblical Korean frequently uses these formal verb/adjective endings.
+// They must never become memorization answers.
+const KOREAN_VERB_ENDINGS = [
+  '하심이니라', '하셨느니라', '하였느니라', '하시니라', '하시도다', '하시되',
+  '이니라', '느니라', '니라', '도다', '시니라', '시도다', '하셨다', '하였다',
+  '하느니라', '하나니라', '되느니라', '있느니라', '없느니라', '말하되',
+  '이르시되', '가라사대', '할지니라', '할지어다', '지니라', '리라',
+  '합니다', '하십시오', '한다', '했다', '하는', '하며', '하여', '하고',
 ];
 
 // 동사/형용사 어미, 문장 종결 및 연결 어미 (조사/어미 결합 형태 포함)
@@ -54,6 +79,9 @@ const isLikelyNoun = (cleanWord: string): boolean => {
     if (!/^\d+[?-?]/.test(cleanWord)) return false;
   }
   if (isStopWord(cleanWord)) return false;
+  if (KOREAN_VERB_ENDINGS.some(ending => cleanWord.endsWith(ending))) {
+    return false;
+  }
   if (VERB_OR_PARTICLE_ENDINGS.some(ending => cleanWord.endsWith(ending))) {
     return false;
   }
@@ -118,11 +146,14 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
 
     const candidates = originalWords.map((word, wordIndex) => {
         const clean = stripPunctuation(word);
+        const split = splitKoreanParticle(clean);
         return {
             original: word,
             clean,
+            answer: split.answer,
+            trailing: split.particle,
             wordIndex,
-            score: scoreCandidate(clean),
+            score: scoreCandidate(split.answer),
         };
     });
 
@@ -144,12 +175,12 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
     // Keep randomness for variety, while preventing low-quality words from entering the pool.
     const selectionPool = eligibleWords
       .filter((candidate, candidateIndex, all) =>
-        all.findIndex(other => other.clean === candidate.clean) === candidateIndex
+        all.findIndex(other => other.answer === candidate.answer) === candidateIndex
       )
       .slice(0, Math.min(3, eligibleWords.length));
     const chosenWords = [...selectionPool]
       .sort(() => Math.random() - 0.5)
-      .slice(0, Math.min(2, selectionPool.length));
+      .slice(0, 1);
     if (chosenWords.length === 0) continue;
 
     const parts: string[] = [];
@@ -168,8 +199,8 @@ export const createFallbackQuiz = (topic: string, bibleVerse: string | null): Qu
         currentText = '';
       }
       parts.push('___');
-      answers.push(chosen.clean);
-      if (wordIndex < originalWords.length - 1) currentText = ' ';
+      answers.push(chosen.answer);
+      currentText = chosen.trailing + (wordIndex < originalWords.length - 1 ? ' ' : '');
     });
     if (currentText) parts.push(currentText);
 
@@ -261,6 +292,24 @@ export const isValidQuiz = (quiz: unknown, sourceText: string | null, topic?: st
     );
   }
   return true;
+};
+
+/** Normalize quizzes saved before particle-separated blanks were introduced. */
+export const normalizeSavedQuiz = (quiz: Quiz | null): Quiz | null => {
+  if (!quiz) return null;
+  return {
+    ...quiz,
+    questions: quiz.questions.map(question => {
+      if (question.type !== QuestionType.FILL_IN_THE_BLANK || question.answers.length !== 1) return question;
+      const split = splitKoreanParticle(question.answers[0]);
+      if (split.answer === question.answers[0] || split.particle === '') return question;
+      const parts = [...question.verseTextParts];
+      const blankIndex = parts.indexOf('___');
+      if (blankIndex < 0) return question;
+      parts.splice(blankIndex + 1, 0, split.particle);
+      return { ...question, verseTextParts: parts, answers: [split.answer] };
+    }),
+  };
 };
 
 /**
