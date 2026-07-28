@@ -1,4 +1,6 @@
-const CACHE_NAME = 'jt-bible-cache-v3';
+// Bump this whenever the deployed bundle changes so GitHub Pages does not
+// keep serving an older index.html or JavaScript bundle indefinitely.
+const CACHE_NAME = 'jt-bible-cache-v4';
 const BASE_URL = new URL(self.registration.scope).pathname;
 const urlsToCache = [
   BASE_URL,
