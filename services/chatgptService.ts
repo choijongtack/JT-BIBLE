@@ -4,38 +4,57 @@ import { buildSystemInstruction } from './instructionTemplate';
 import { BIBLE_METADATA } from './bibleData';
 
 const PREFERRED_CHATGPT_MODEL_KEY = 'jt-bible-chatgpt-model';
-const CHATGPT_ALLOWED_MODELS = ['gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini'] as const;
+
+export const CHATGPT_ALLOWED_MODELS = [
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'o3-mini', label: 'o3-mini' },
+    { value: 'o1-mini', label: 'o1-mini' },
+    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+    { value: 'gpt-4', label: 'GPT-4' },
+    { value: 'gpt-4.1', label: 'gpt-4.1' },
+    { value: 'gpt-4.1-mini', label: 'gpt-4.1-mini' },
+] as const;
+
 const DEFAULT_CHATGPT_MODEL = (import.meta.env.VITE_CHATGPT_MODEL as string | undefined)?.trim() || 'gpt-4o-mini';
-const CHATGPT_FALLBACK_MODELS = [...CHATGPT_ALLOWED_MODELS];
+const CHATGPT_FALLBACK_MODELS = CHATGPT_ALLOWED_MODELS.map(model => model.value);
+
+type ChatGptModel = typeof CHATGPT_ALLOWED_MODELS[number]['value'];
+
+const isAllowedChatGptModel = (model: string): model is ChatGptModel =>
+    CHATGPT_ALLOWED_MODELS.some(option => option.value === model);
 
 const PROXY_URL = `${supabaseUrl}/functions/v1/chatgpt-proxy`;
 
 export const setPreferredChatGptModel = (model: string) => {
     const nextModel = model?.trim();
-    if (!nextModel || !CHATGPT_ALLOWED_MODELS.includes(nextModel as typeof CHATGPT_ALLOWED_MODELS[number])) return;
+    if (!nextModel || !isAllowedChatGptModel(nextModel)) return;
     if (typeof window !== 'undefined') {
         window.localStorage.setItem(PREFERRED_CHATGPT_MODEL_KEY, nextModel);
     }
 };
 
-export const getChatGptModel = () => {
+export const getChatGptModel = (): ChatGptModel => {
     if (typeof window !== 'undefined') {
         const stored = window.localStorage.getItem(PREFERRED_CHATGPT_MODEL_KEY);
         const normalizedStored = stored?.trim();
-        if (normalizedStored && CHATGPT_ALLOWED_MODELS.includes(normalizedStored as typeof CHATGPT_ALLOWED_MODELS[number])) {
+        if (normalizedStored && isAllowedChatGptModel(normalizedStored)) {
             return normalizedStored;
         }
     }
-    if (DEFAULT_CHATGPT_MODEL && CHATGPT_ALLOWED_MODELS.includes(DEFAULT_CHATGPT_MODEL as typeof CHATGPT_ALLOWED_MODELS[number])) {
+    if (DEFAULT_CHATGPT_MODEL && isAllowedChatGptModel(DEFAULT_CHATGPT_MODEL)) {
         return DEFAULT_CHATGPT_MODEL;
     }
     return 'gpt-4o-mini';
 };
 
+export const getChatGptModelDisplayName = (model = getChatGptModel()) =>
+    CHATGPT_ALLOWED_MODELS.find(option => option.value === model)?.label || model;
+
 const getModelCandidateList = (preferred: string) => {
     const pref = preferred?.trim();
     const candidates = [pref, ...CHATGPT_FALLBACK_MODELS];
-    return Array.from(new Set(candidates.filter((item): item is string => Boolean(item))));
+    return Array.from(new Set(candidates.filter((item): item is ChatGptModel => Boolean(item) && isAllowedChatGptModel(item))));
 };
 
 /**
@@ -55,7 +74,6 @@ const getAuthHeaders = async (): Promise<HeadersInit> => {
 /**
  * A generic helper function to call the ChatGPT completion proxy.
  * It sends the full payload required by the OpenAI API.
- * The backend proxy is expected to forward this payload.
  * @param payload The request body to be sent to the OpenAI API.
  * @returns The JSON response from the API.
  */

@@ -4,7 +4,7 @@ import type { CompletedPassage } from '../services/userDataService';
 import { IconCheck, IconLoader, NEW_TESTAMENT_BOOKS, OLD_TESTAMENT_BOOKS } from '../constants';
 import { calculateVerseProgressForList, BIBLE_METADATA } from '../services/bibleData';
 import { parseReference } from '../services/bibleUtils';
-import { saveChatGptApiKey, deleteChatGptApiKey, getChatGptModel, setPreferredChatGptModel } from '../services/chatgptService';
+import { saveChatGptApiKey, deleteChatGptApiKey, getChatGptModel, setPreferredChatGptModel, CHATGPT_ALLOWED_MODELS } from '../services/chatgptService';
 import { GEMINI_ALLOWED_MODELS, getGeminiModel, setPreferredGeminiModel } from '../services/geminiService';
 import { savePerplexityApiKey, deletePerplexityApiKey } from '../services/perplexityService';
 import CalvinChatModal from './CalvinChatModal';
@@ -343,7 +343,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                   </select>
                 </div>
                 <p className="mt-2 text-xs text-slate-400">
-                  기본 추천은 Gemini 3.6 Flash입니다.
+                  기본 추천은 Gemini 3.7 Flash입니다.
                 </p>
               </div>
             )}
@@ -380,9 +380,9 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                     }}
                     className="ml-2 rounded-md border border-slate-500 bg-slate-700 px-2 py-1 text-xs text-slate-100"
                   >
-                    <option value="gpt-4o-mini">gpt-4o-mini</option>
-                    <option value="gpt-4.1">gpt-4.1</option>
-                    <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                    {CHATGPT_ALLOWED_MODELS.map(model => (
+                      <option key={model.value} value={model.value}>{model.label}</option>
+                    ))}
                   </select>
                 </div>
                 {chatGptKeyStatus === 'saved' ? (

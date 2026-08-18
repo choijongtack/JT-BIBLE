@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Quiz, ChatMessage, LearningSessionState } from '../types';
 import { normalizeSavedQuiz } from '../services/learningSessionUtils';
 import { LearningStep } from '../constants';
@@ -16,7 +16,7 @@ import StepSelectionModal from './learning/StepSelectionModal';
 import PrayerModal from './PrayerModal';
 import { generatePrayerForTopic as generateGeminiPrayer, getGeminiModelDisplayName } from '../services/geminiService';
 import { generatePrayerForTopic as generatePerplexityPrayer } from '../services/perplexityService';
-import { generatePrayerForTopic as generateChatGptPrayer } from '../services/chatgptService';
+import { generatePrayerForTopic as generateChatGptPrayer, getChatGptModelDisplayName } from '../services/chatgptService';
 
 
 interface ConversationalLearningProps {
@@ -36,7 +36,7 @@ const getAiModelDisplayName = (aiModel: LearningSessionState['aiModel']) => {
     case 'perplexity':
       return 'Perplexity Sonar';
     case 'chatgpt':
-      return 'ChatGPT 4o-mini';
+      return getChatGptModelDisplayName();
     default:
       return aiModel;
   }
