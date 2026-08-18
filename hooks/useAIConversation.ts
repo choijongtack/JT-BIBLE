@@ -78,6 +78,14 @@ const requiresCalvinCitation = (processed: ProcessedResponse, userMessage: strin
     return true;
 };
 
+const withSystemInstruction = <T extends { role: 'system' | 'user' | 'assistant'; content: string }>(
+    history: T[],
+    systemInstruction: string
+): T[] => {
+    const nonSystemHistory = history.filter(message => message.role !== 'system');
+    return [{ role: 'system', content: systemInstruction } as T, ...nonSystemHistory];
+};
+
 const inferStepFromText = (text: string): LearningStep | undefined => {
     const compact = text.replace(/\s+/g, ' ').trim();
     if (!compact) return undefined;
@@ -88,9 +96,9 @@ const inferStepFromText = (text: string): LearningStep | undefined => {
     const hasTransitionCue = transitionCue.test(compact);
 
     const stepMatchers: Array<{ step: LearningStep; regex: RegExp }> = [
-        { step: LearningStep.OBSERVATION, regex: /관찰\s*단계/ },
-        { step: LearningStep.INTERPRETATION, regex: /해석\s*단계/ },
-        { step: LearningStep.APPLICATION, regex: /적용\s*단계/ },
+        { step: LearningStep.OBSERVATION, regex: /관찰\s*단계|누가|언제|어디서|무엇을\s*했/ },
+        { step: LearningStep.INTERPRETATION, regex: /해석\s*단계|본문(?:이|의)?\s*(?:말하려는\s*)?의미|핵심\s*메시지|왜\s*이런\s*말/ },
+        { step: LearningStep.APPLICATION, regex: /적용\s*단계|삶(?:과|에|에서)?.*적용|오늘날.*(?:삶|공동체|교훈)|공동체.*교훈/ },
         { step: LearningStep.MEMORIZE_AND_TEST, regex: /(암송\s*\/\s*시험|암송\/시험)\s*단계|시험을\s*시작/ },
         { step: LearningStep.ANALYSIS, regex: /분석\s*단계/ },
         { step: LearningStep.UNDERSTANDING, regex: /이해\s*단계/ },
@@ -106,6 +114,55 @@ const inferStepFromText = (text: string): LearningStep | undefined => {
 
     return undefined;
 };
+
+const findJsonObjectBlock = (text: string): { json: string; start: number; end: number } | null => {
+    const firstBrace = text.indexOf('{');
+    if (firstBrace === -1) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = firstBrace; index < text.length; index += 1) {
+        const char = text[index];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (char === '\\') {
+                escaped = true;
+            } else if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inString = true;
+            continue;
+        }
+
+        if (char === '{') depth += 1;
+        if (char === '}') depth -= 1;
+
+        if (depth === 0) {
+            return {
+                json: text.substring(firstBrace, index + 1),
+                start: firstBrace,
+                end: index + 1,
+            };
+        }
+    }
+
+    return null;
+};
+
+const cleanQuizDisplayText = (text: string): string =>
+    text
+        .replace(/\[START_TEST\]/g, '')
+        .replace(/```(?:json)?/gi, '')
+        .replace(/```/g, '')
+        .trim();
 
 export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bibleVerse }: UseAIConversationProps) => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -145,25 +202,25 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
         }
       
         const testMatchIndex = cleanedText.indexOf('[START_TEST]');
-        if (testMatchIndex !== -1) {
-          const textBeforeTag = cleanedText.substring(0, testMatchIndex).trim();
-          const stringAfterTag = cleanedText.substring(testMatchIndex + '[START_TEST]'.length);
+        const hasQuizPayload = testMatchIndex !== -1 || /"questions"\s*:/.test(cleanedText);
+        if (hasQuizPayload) {
+          const textBeforeTag = testMatchIndex !== -1 ? cleanedText.substring(0, testMatchIndex).trim() : '';
+          const stringAfterTag = testMatchIndex !== -1
+            ? cleanedText.substring(testMatchIndex + '[START_TEST]'.length)
+            : cleanedText;
           
           // --- BUG FIX: Use the verse from state OR the one just extracted from this response ---
           const verseForQuiz = bibleVerse || extractedVerse;
           
           let quizJsonString = '';
           try {
-            const jsonStartIndex = stringAfterTag.search(/[{\[]/);
-            if (jsonStartIndex !== -1) {
-              const textBetweenTagAndJson = stringAfterTag.substring(0, jsonStartIndex).trim();
-              const displayText = [textBeforeTag, textBetweenTagAndJson].filter(Boolean).join('\n\n').trim();
-              
-              let rawJsonString = stringAfterTag.substring(jsonStartIndex);
-              const lastBracket = rawJsonString.lastIndexOf(']');
-              const lastBrace = rawJsonString.lastIndexOf('}');
-              const jsonEndIndex = Math.max(lastBracket, lastBrace);
-              quizJsonString = jsonEndIndex > -1 ? rawJsonString.substring(0, jsonEndIndex + 1) : rawJsonString;
+            const jsonBlock = findJsonObjectBlock(stringAfterTag) || findJsonObjectBlock(cleanedText);
+            if (jsonBlock) {
+              quizJsonString = jsonBlock.json;
+              const displaySource = stringAfterTag.includes(jsonBlock.json)
+                ? [textBeforeTag, stringAfterTag.substring(0, jsonBlock.start), stringAfterTag.substring(jsonBlock.end)].join('\n\n')
+                : `${cleanedText.substring(0, jsonBlock.start)}\n\n${cleanedText.substring(jsonBlock.end)}`;
+              const displayText = cleanQuizDisplayText(displaySource);
       
               const parsedQuiz = JSON.parse(quizJsonString) as Quiz;
               
@@ -264,24 +321,19 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
                     return continueGeminiConversation(chatHistory, finalApiMessage, topic, mode, CALVIN_CITATION_POLICY);
                 }
 
-                // For ChatGPT and Perplexity, the system instruction is the first message in the history.
-                const historyForApi: ApiChatMessage[] = chatHistory.map((m): ApiChatMessage => {
+                // For ChatGPT and Perplexity, keep the latest system instruction at the front on every request.
+                const historyForApi: ApiChatMessage[] = withSystemInstruction(chatHistory.map((m): ApiChatMessage => {
                     switch (m.role) {
                         case 'model': return { role: 'assistant', content: m.content };
                         case 'user': return { role: 'user', content: m.content };
                         case 'system': return { role: 'system', content: m.content };
                     }
-                });
+                }), systemInstruction);
 
-                if (historyForApi.length === 0) {
-                    historyForApi.unshift({ role: 'system', content: systemInstruction });
-                }
-
-                if (aiModel === 'perplexity') {
-                    return continuePerplexityConversation(historyForApi, messageForModel);
-                }
-                // Align ChatGPT behavior with Gemini by applying the same passage-enforced/flexible wrapper.
                 const finalApiMessage = constructEnforcedPrompt(messageForModel, topic, bibleVerse, options);
+                if (aiModel === 'perplexity') {
+                    return continuePerplexityConversation(historyForApi, finalApiMessage);
+                }
                 return continueChatGptConversation(historyForApi, finalApiMessage);
             };
 
@@ -306,11 +358,8 @@ export const useAIConversation = ({ initialChatHistory, topic, mode, aiModel, bi
 
             const newModelMessage: ChatMessage = { role: 'model', content: responseText };
             
-            // For ChatGPT/Perplexity, add the system prompt to the persisted history on the first turn
-            if (chatHistory.length === 0 && (aiModel === 'chatgpt' || aiModel === 'perplexity')) {
-                 // FIX: Removed `as any` assertion. The `ChatMessage` type in `types.ts` has been updated
-                 // to include the 'system' role, making this type-safe.
-                 setChatHistory([{ role: 'system', content: systemInstruction }, newUserMessage, newModelMessage]);
+            if (aiModel === 'chatgpt' || aiModel === 'perplexity') {
+                 setChatHistory(prev => withSystemInstruction([...prev, newUserMessage, newModelMessage], systemInstruction));
             } else {
                  setChatHistory(prev => [...prev, newUserMessage, newModelMessage]);
             }

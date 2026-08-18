@@ -4,6 +4,54 @@ import { buildSystemInstruction } from './instructionTemplate';
 import { BIBLE_METADATA } from './bibleData';
 
 const PROXY_FUNCTION_NAME = 'gemini-proxy';
+const PREFERRED_GEMINI_MODEL_KEY = 'jt-bible-gemini-model';
+
+export const GEMINI_ALLOWED_MODELS = [
+    { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+    { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+    { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
+    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+] as const;
+
+const DEFAULT_GEMINI_MODEL = (import.meta.env.VITE_GEMINI_MODEL as string | undefined)?.trim() || 'gemini-3.6-flash';
+const GEMINI_FALLBACK_MODELS = GEMINI_ALLOWED_MODELS.map(model => model.value);
+
+type GeminiModel = typeof GEMINI_ALLOWED_MODELS[number]['value'];
+
+const isAllowedGeminiModel = (model: string): model is GeminiModel =>
+    GEMINI_ALLOWED_MODELS.some(option => option.value === model);
+
+export const setPreferredGeminiModel = (model: string) => {
+    const nextModel = model?.trim();
+    if (!nextModel || !isAllowedGeminiModel(nextModel)) return;
+    if (typeof window !== 'undefined') {
+        window.localStorage.setItem(PREFERRED_GEMINI_MODEL_KEY, nextModel);
+    }
+};
+
+export const getGeminiModel = (): GeminiModel => {
+    if (typeof window !== 'undefined') {
+        const stored = window.localStorage.getItem(PREFERRED_GEMINI_MODEL_KEY);
+        const normalizedStored = stored?.trim();
+        if (normalizedStored && isAllowedGeminiModel(normalizedStored)) {
+            return normalizedStored;
+        }
+    }
+    if (DEFAULT_GEMINI_MODEL && isAllowedGeminiModel(DEFAULT_GEMINI_MODEL)) {
+        return DEFAULT_GEMINI_MODEL;
+    }
+    return 'gemini-3.6-flash';
+};
+
+export const getGeminiModelDisplayName = (model = getGeminiModel()) =>
+    GEMINI_ALLOWED_MODELS.find(option => option.value === model)?.label || model;
+
+const getModelCandidateList = (preferred: string) => {
+    const pref = preferred?.trim();
+    const candidates = [pref, ...GEMINI_FALLBACK_MODELS];
+    return Array.from(new Set(candidates.filter((item): item is GeminiModel => Boolean(item) && isAllowedGeminiModel(item))));
+};
 
 /**
  * Calls the Supabase Edge Function which securely proxies the request to the Gemini API.
@@ -11,34 +59,48 @@ const PROXY_FUNCTION_NAME = 'gemini-proxy';
  * @returns The text content from the Gemini API response.
  */
 const callGeminiProxy = async (payload: object): Promise<string> => {
-    // FIX: Re-wrapped the body in a 'payload' object to align with the structure
-    // used by other proxy functions (Perplexity, ChatGPT), ensuring consistency.
-    const { data, error } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
-        body: { payload },
-    });
+    let lastError: Error | null = null;
+    for (const model of getModelCandidateList(getGeminiModel())) {
+        const { data, error } = await supabase.functions.invoke(PROXY_FUNCTION_NAME, {
+            body: { payload, model },
+        });
 
-    if (error) {
-        console.error("Supabase function invocation error:", error);
-        throw new Error(`프록시 함수 호출에 실패했습니다: ${error.message}`);
-    }
-
-    // The proxy returns the raw response from the Gemini API.
-    // We need to handle potential errors from the Gemini API itself within the response data.
-    if (data.error) {
-        console.error("Gemini API Error:", data.error);
-        throw new Error(`Gemini API 오류: ${data.error.message}`);
-    }
-
-    if (!data.candidates || !data.candidates[0]?.content?.parts?.[0]?.text) {
-        console.error("Invalid response structure from Gemini API:", data);
-        // Handle safety blocks or other non-standard responses
-        if (data.promptFeedback?.blockReason) {
-             throw new Error(`요청이 Gemini의 안전 설정에 의해 차단되었습니다. 이유: ${data.promptFeedback.blockReason}`);
+        if (error) {
+            console.error("Supabase function invocation error:", error);
+            throw new Error(`프록시 함수 호출에 실패했습니다: ${error.message}`);
         }
-        throw new Error('Gemini API로부터 유효한 텍스트 응답을 받지 못했습니다.');
+
+        if (data.error) {
+            const originalMessage = data.error.message || 'Gemini API 오류가 발생했습니다.';
+            const lowerMessage = originalMessage.toLowerCase();
+            const modelFailure = lowerMessage.includes('model') && (
+                lowerMessage.includes('not found') ||
+                lowerMessage.includes('does not exist') ||
+                lowerMessage.includes('unavailable') ||
+                lowerMessage.includes('invalid') ||
+                lowerMessage.includes('deprecated')
+            );
+            lastError = new Error(`Gemini API 오류: ${originalMessage}`);
+            if (modelFailure) {
+                console.warn(`Gemini 모델 '${model}'에서 실패했습니다. 다음 후보 모델을 시도합니다.`, originalMessage);
+                continue;
+            }
+            console.error("Gemini API Error:", data.error);
+            throw lastError;
+        }
+
+        if (!data.candidates || !data.candidates[0]?.content?.parts?.[0]?.text) {
+            console.error("Invalid response structure from Gemini API:", data);
+            if (data.promptFeedback?.blockReason) {
+                 throw new Error(`요청이 Gemini의 안전 설정에 의해 차단되었습니다. 이유: ${data.promptFeedback.blockReason}`);
+            }
+            throw new Error('Gemini API로부터 유효한 텍스트 응답을 받지 못했습니다.');
+        }
+
+        return data.candidates[0].content.parts[0].text;
     }
 
-    return data.candidates[0].content.parts[0].text;
+    throw lastError || new Error('Gemini 모델 요청에 실패했습니다. 모델 설정을 확인해주세요.');
 };
 
 const toGeminiHistory = (history: ChatMessage[]) => {

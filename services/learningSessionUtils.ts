@@ -341,6 +341,12 @@ export const constructEnforcedPrompt = (
 ${bibleVerse}
 ---
 
+[공통 출력 형식 규칙]
+- 단계 전환 시에는 반드시 [NEXT_STEP:STEP_NAME_IN_ENGLISH] 태그를 포함하세요.
+- 퀴즈를 생성할 때는 반드시 [START_TEST] 태그 바로 뒤에 원시 JSON 객체만 출력하세요.
+- JSON은 markdown 코드블록, backtick, 설명 문장, 주석으로 감싸지 마세요.
+- JSON 객체의 마지막 닫는 중괄호 뒤에는 어떤 텍스트도 추가하지 마세요.
+
 이제 위의 규칙과 본문을 바탕으로 다음 시스템 지시를 수행하세요:
 "${userMessage}"
 `.trim();

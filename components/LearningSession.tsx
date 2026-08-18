@@ -14,7 +14,7 @@ import StepControl from './learning/StepControl';
 import LoadingDots from './learning/LoadingDots';
 import StepSelectionModal from './learning/StepSelectionModal';
 import PrayerModal from './PrayerModal';
-import { generatePrayerForTopic as generateGeminiPrayer } from '../services/geminiService';
+import { generatePrayerForTopic as generateGeminiPrayer, getGeminiModelDisplayName } from '../services/geminiService';
 import { generatePrayerForTopic as generatePerplexityPrayer } from '../services/perplexityService';
 import { generatePrayerForTopic as generateChatGptPrayer } from '../services/chatgptService';
 
@@ -29,10 +29,17 @@ interface ConversationalLearningProps {
   onSystemBack: () => void;
 }
 
-const AI_MODEL_DISPLAY_NAMES: Record<LearningSessionState['aiModel'], string> = {
-  gemini: 'Gemini 2.5 Flash',
-  perplexity: 'Perplexity Sonar',
-  chatgpt: 'ChatGPT 4o-mini'
+const getAiModelDisplayName = (aiModel: LearningSessionState['aiModel']) => {
+  switch (aiModel) {
+    case 'gemini':
+      return getGeminiModelDisplayName();
+    case 'perplexity':
+      return 'Perplexity Sonar';
+    case 'chatgpt':
+      return 'ChatGPT 4o-mini';
+    default:
+      return aiModel;
+  }
 };
 
 const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSession, onStateChange, onFinish, onBack, onSaveAndExit, onSkip, onSystemBack }) => {
@@ -297,7 +304,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
     const timestamp = new Date().toISOString();
     const body = [
       `Topic: ${topic}`,
-      `AI: ${AI_MODEL_DISPLAY_NAMES[aiModel]}`,
+      `AI: ${getAiModelDisplayName(aiModel)}`,
       `Mode: ${mode}`,
       `ExportedAt: ${timestamp}`,
       '',
@@ -400,7 +407,7 @@ const ConversationalLearning: React.FC<ConversationalLearningProps> = ({ savedSe
               </button>
               <h2 className="hidden sm:block text-xl font-bold text-slate-100 truncate" title={topic}>{topic}</h2>
               <p className="hidden sm:block text-xs text-blue-400 mt-1">
-                  AI 모델: {AI_MODEL_DISPLAY_NAMES[aiModel]} ({mode === 'general' ? '일반 학습' : '심화 학습'})
+                  AI 모델: {getAiModelDisplayName(aiModel)} ({mode === 'general' ? '일반 학습' : '심화 학습'})
                   <span className="font-semibold text-slate-300"> · {currentStep}</span>
               </p>
             </div>

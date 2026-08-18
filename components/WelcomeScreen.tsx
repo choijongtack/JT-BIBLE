@@ -5,6 +5,7 @@ import { IconCheck, IconLoader, NEW_TESTAMENT_BOOKS, OLD_TESTAMENT_BOOKS } from 
 import { calculateVerseProgressForList, BIBLE_METADATA } from '../services/bibleData';
 import { parseReference } from '../services/bibleUtils';
 import { saveChatGptApiKey, deleteChatGptApiKey, getChatGptModel, setPreferredChatGptModel } from '../services/chatgptService';
+import { GEMINI_ALLOWED_MODELS, getGeminiModel, setPreferredGeminiModel } from '../services/geminiService';
 import { savePerplexityApiKey, deletePerplexityApiKey } from '../services/perplexityService';
 import CalvinChatModal from './CalvinChatModal';
 import DirectVersePickerModal from './DirectVersePickerModal';
@@ -73,6 +74,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const [isDirectPickerOpen, setIsDirectPickerOpen] = useState(false);
 
   const [isCalvinChatOpen, setIsCalvinChatOpen] = useState(false);
+  const [selectedGeminiModel, setSelectedGeminiModel] = useState<string>(getGeminiModel());
   const [selectedChatGptModel, setSelectedChatGptModel] = useState<string>(getChatGptModel());
 
   const [perplexityApiKey, setPerplexityApiKey] = useState('');
@@ -103,6 +105,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       setPerplexityApiKey('');
     }
     setSelectedChatGptModel(getChatGptModel());
+    setSelectedGeminiModel(getGeminiModel());
   }, [profile]);
 
   useEffect(() => {
@@ -313,13 +316,37 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <div>
             <h4 className="mb-3 text-center text-lg font-semibold text-slate-200">AI 모델 선택</h4>
             <div className="flex flex-wrap justify-center gap-4">
-              <button onClick={() => setSelectedAI('gemini')} className={`rounded-lg px-5 py-2 font-semibold transition-all ${selectedAI === 'gemini' ? 'bg-blue-600 text-white ring-2 ring-blue-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}>Gemini 2.5 Flash</button>
+              <button onClick={() => setSelectedAI('gemini')} className={`rounded-lg px-5 py-2 font-semibold transition-all ${selectedAI === 'gemini' ? 'bg-blue-600 text-white ring-2 ring-blue-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}>Gemini</button>
               <button onClick={() => setSelectedAI('perplexity')} className={`rounded-lg px-5 py-2 font-semibold transition-all ${selectedAI === 'perplexity' ? 'bg-purple-600 text-white ring-2 ring-purple-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}>Perplexity Sonar</button>
               <button onClick={() => setSelectedAI('chatgpt')} className={`rounded-lg px-5 py-2 font-semibold transition-all ${selectedAI === 'chatgpt' ? 'bg-teal-600 text-white ring-2 ring-teal-400' : 'bg-slate-600 text-slate-300 hover:bg-slate-500'}`}>ChatGPT 4o-mini</button>
             </div>
           </div>
 
           <div className="mx-auto mt-2 w-full max-w-lg">
+            {selectedAI === 'gemini' && (
+              <div className="rounded-lg border border-blue-800/50 bg-slate-900/50 p-4">
+                <h5 className="mb-3 text-center font-semibold text-blue-300">Gemini 모델 선택</h5>
+                <div className="text-sm text-slate-200">
+                  모델 선택:
+                  <select
+                    value={selectedGeminiModel}
+                    onChange={(e) => {
+                      const nextModel = e.target.value;
+                      setSelectedGeminiModel(nextModel);
+                      setPreferredGeminiModel(nextModel);
+                    }}
+                    className="ml-2 rounded-md border border-slate-500 bg-slate-700 px-2 py-1 text-xs text-slate-100"
+                  >
+                    {GEMINI_ALLOWED_MODELS.map(model => (
+                      <option key={model.value} value={model.value}>{model.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <p className="mt-2 text-xs text-slate-400">
+                  기본 추천은 Gemini 3.6 Flash입니다.
+                </p>
+              </div>
+            )}
             {selectedAI === 'perplexity' && (
               <div className="rounded-lg border border-purple-800/50 bg-slate-900/50 p-4">
                 <h5 className="mb-3 text-center font-semibold text-purple-300">Perplexity API 키 관리</h5>

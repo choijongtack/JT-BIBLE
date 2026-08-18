@@ -13,8 +13,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// FIX: Updated model from deprecated gemini-1.5-flash to the current gemini-2.5-flash model.
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
+const GEMINI_ALLOWED_MODELS = new Set([
+  "gemini-3.6-flash",
+  "gemini-3.7-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-pro-preview",
+  "gemini-2.5-flash",
+]);
+
+const getGeminiApiUrl = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -48,13 +57,16 @@ serve(async (req) => {
 
     // FIX: To align with other proxy functions, the request body is now expected
     // to be an object with a 'payload' key containing the actual Gemini request.
-    const { payload } = await req.json();
+    const { payload, model } = await req.json();
 
     if (!payload || !payload.contents) {
         throw new Error("Request body must contain a 'payload' property with a valid Gemini 'contents' object.");
     }
 
-    const response = await fetch(`${GEMINI_API_URL}?key=${geminiApiKey}`, {
+    const requestedModel = typeof model === 'string' ? model.trim() : DEFAULT_GEMINI_MODEL;
+    const geminiModel = GEMINI_ALLOWED_MODELS.has(requestedModel) ? requestedModel : DEFAULT_GEMINI_MODEL;
+
+    const response = await fetch(`${getGeminiApiUrl(geminiModel)}?key=${geminiApiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
